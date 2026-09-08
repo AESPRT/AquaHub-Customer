@@ -1,0 +1,151 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function isCustomer() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CUSTOMER' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+    function memberPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid);
+    }
+    function isMember(businessId) {
+      return signedIn() && exists(memberPath(businessId)) && get(memberPath(businessId)).data.isActive == true;
+    }
+    function role(businessId) { return get(memberPath(businessId)).data.role; }
+    function managesBusiness(businessId) {
+      return isMember(businessId) && role(businessId) in ['OWNER', 'MANAGER'];
+    }
+    function ownsBusiness(businessId) {
+      return signedIn() && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid;
+    }
+    function stationAccess(businessId, stationId) {
+      return isMember(businessId) && (
+        role(businessId) in ['OWNER', 'MANAGER'] ||
+        stationId in get(memberPath(businessId)).data.stationIds
+      );
+    }
+    function operatesStation(businessId, stationId) {
+      return stationAccess(businessId, stationId) && role(businessId) in ['OWNER', 'MANAGER', 'STAFF'];
+    }
+    function belongsToStation(stationId) { return request.resource.data.stationId == stationId; }
+
+    match /users/{uid} {
+      allow read: if self(uid);
+      allow create: if self(uid) && request.resource.data.uid == uid &&
+        request.resource.data.role in ['CUSTOMER', 'OWNER', 'MANAGER', 'STAFF'];
+      allow update: if self(uid) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.isActive == resource.data.isActive;
+      allow delete: if false;
+
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if self(uid);
+      }
+      match /orders/{orderId} {
+        allow read: if self(uid);
+        allow write: if false;
+      }
+    }
+
+    // Customer-safe projections. These contain no private business, staff,
+    // inventory cost, subscription, or customer-list data.
+    match /publicStations/{stationId} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /products/{productId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+
+    match /businesses/{businessId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if isMember(businessId);
+      allow update: if ownsBusiness(businessId) &&
+        request.resource.data.ownerUid == resource.data.ownerUid &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(businessId);
+        allow create: if (managesBusiness(businessId) && request.resource.data.uid == uid &&
+          request.resource.data.role in ['MANAGER', 'STAFF']) ||
+          (signedIn() && uid == request.auth.uid &&
+            get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid &&
+            request.resource.data.role == 'OWNER');
+        allow update: if managesBusiness(businessId) && resource.data.role != 'OWNER' &&
+          request.resource.data.role in ['MANAGER', 'STAFF'] && request.resource.data.uid == uid;
+        allow delete: if false;
+      }
+
+      match /stations/{stationId} {
+        allow read: if stationAccess(businessId, stationId);
+        allow create, update: if managesBusiness(businessId);
+        allow delete: if false;
+
+        match /customers/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+        }
+        match /customerAddresses/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+        }
+        match /products/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+        }
+        match /riders/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+        }
+        match /orders/{id} {
+          allow read: if operatesStation(businessId, stationId) ||
+            (signedIn() && resource.data.customerUid == request.auth.uid);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+          allow delete: if false;
+        }
+        match /containerInventory/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+        }
+        match /containerMovements/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create: if operatesStation(businessId, stationId) && belongsToStation(stationId);
+          allow update, delete: if false;
+        }
+        match /payments/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create: if operatesStation(businessId, stationId) && belongsToStation(stationId) &&
+            request.resource.data.paymentMethod in ['CASH', 'CASH_ON_DELIVERY'];
+          allow update: if managesBusiness(businessId) && belongsToStation(stationId) &&
+            request.resource.data.stationId == resource.data.stationId &&
+            request.resource.data.amountCentavos == resource.data.amountCentavos &&
+            request.resource.data.paymentMethod == resource.data.paymentMethod;
+          allow delete: if false;
+        }
+      }
+
+      match /subscription/{document=**} {
+        allow read: if isMember(businessId);
+        allow write: if false;
+      }
+    }
+
+    match /subscriptionPlans/{planId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Idempotency records and audit events are backend-only.
+    match /customerOrderRequests/{id} { allow read, write: if false; }
+    match /auditEvents/{id} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

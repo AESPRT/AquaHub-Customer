@@ -1,0 +1,83 @@
+{
+  "project_info": {
+    "project_number": "986230110871",
+    "firebase_url": "https://aquahub-506411-default-rtdb.firebaseio.com",
+    "project_id": "aquahub-506411",
+    "storage_bucket": "aquahub-506411.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:986230110871:android:bac6168034460bfecd07d2",
+        "android_client_info": {
+          "package_name": "com.aesprt.aquahub"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "986230110871-djfrm69u9osub7dqsi14bl75g9lq0klt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub",
+            "certificate_hash": "151898d4973bfc2ac61b448e4fb1d35e110bb775"
+          }
+        },
+        {
+          "client_id": "986230110871-p4euetbhr5o4of54u20jegp7til4dlfd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXbG8XpP_w67c6RgOh41n8QzZdXS-lQBc"
+        },
+        {
+          "current_key": "AIzaSyDiE7_8TbQC3jWHdhuomHWeyI36SilAmAI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "986230110871-p4euetbhr5o4of54u20jegp7til4dlfd.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:986230110871:android:692a780669a4f067cd07d2",
+        "android_client_info": {
+          "package_name": "com.aesprt.aquahub_customer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "986230110871-p4euetbhr5o4of54u20jegp7til4dlfd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXbG8XpP_w67c6RgOh41n8QzZdXS-lQBc"
+        },
+        {
+          "current_key": "AIzaSyDiE7_8TbQC3jWHdhuomHWeyI36SilAmAI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "986230110871-p4euetbhr5o4of54u20jegp7til4dlfd.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

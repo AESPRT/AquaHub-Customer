@@ -1,0 +1,312 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function self(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function businessPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId);
+    }
+
+    function memberPath(businessId, uid) {
+      return /databases/$(database)/documents/businesses/$(businessId)/members/$(uid);
+    }
+
+    function ownsBusinessAs(businessId, uid) {
+      return exists(businessPath(businessId)) &&
+        get(businessPath(businessId)).data.ownerUid == uid;
+    }
+
+    function ownsBusiness(businessId) {
+      return signedIn() && ownsBusinessAs(businessId, request.auth.uid);
+    }
+
+    function isMember(businessId) {
+      return signedIn() &&
+        exists(memberPath(businessId, request.auth.uid)) &&
+        get(memberPath(businessId, request.auth.uid)).data.isActive == true;
+    }
+
+    function memberRole(businessId) {
+      return get(memberPath(businessId, request.auth.uid)).data.role;
+    }
+
+    function subscriptionPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/subscription/current;
+    }
+
+    function hasActiveSubscription(businessId) {
+      return exists(subscriptionPath(businessId)) &&
+        (
+          (
+            get(subscriptionPath(businessId)).data.status == 'TRIALING' &&
+            get(subscriptionPath(businessId)).data.trialEndsAt is timestamp &&
+            get(subscriptionPath(businessId)).data.trialEndsAt > request.time
+          ) ||
+          (
+            get(subscriptionPath(businessId)).data.status in ['ACTIVE', 'ACTIVE_UNTIL_PERIOD_END'] &&
+            get(subscriptionPath(businessId)).data.currentPeriodEnd is timestamp &&
+            get(subscriptionPath(businessId)).data.currentPeriodEnd > request.time
+          )
+        );
+    }
+
+    function licensedMember(businessId) {
+      return isMember(businessId) && hasActiveSubscription(businessId);
+    }
+
+    // Registration creates the business and owner membership before the first
+    // trial callable runs. This exception exists only while no subscription
+    // document exists; an expired subscription cannot use it to regain access.
+    function bootstrapOwner(businessId) {
+      return ownsBusiness(businessId) &&
+        !exists(/databases/$(database)/documents/businesses/$(businessId)/subscription/current);
+    }
+
+    function managesBusiness(businessId) {
+      return (licensedMember(businessId) || bootstrapOwner(businessId)) &&
+        memberRole(businessId) in ['OWNER', 'MANAGER'];
+    }
+
+    function stationAccess(businessId, stationId) {
+      return (licensedMember(businessId) || bootstrapOwner(businessId)) && (
+        memberRole(businessId) in ['OWNER', 'MANAGER'] ||
+        (
+          get(memberPath(businessId, request.auth.uid)).data.stationIds is list &&
+          stationId in get(memberPath(businessId, request.auth.uid)).data.stationIds
+        )
+      );
+    }
+
+    function operatesStation(businessId, stationId) {
+      return stationAccess(businessId, stationId) &&
+        memberRole(businessId) in ['OWNER', 'MANAGER', 'STAFF'];
+    }
+
+    function belongsToStation(stationId) {
+      return request.resource.data.stationId == stationId;
+    }
+
+    function isActiveCustomer() {
+      return signedIn() &&
+        exists(userPath(request.auth.uid)) &&
+        get(userPath(request.auth.uid)).data.role == 'CUSTOMER' &&
+        get(userPath(request.auth.uid)).data.isActive == true;
+    }
+
+    function validCustomerProfileCreate(uid) {
+      return request.resource.data.keys().hasAll(['uid', 'role', 'isActive']) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.role == 'CUSTOMER' &&
+        request.resource.data.isActive == true;
+    }
+
+    function validOwnerProfileCreate(uid) {
+      return request.resource.data.keys().hasAll(['uid', 'activeBusinessId', 'role', 'isActive']) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.role == 'OWNER' &&
+        request.resource.data.isActive == true &&
+        request.resource.data.activeBusinessId is string &&
+        ownsBusinessAs(request.resource.data.activeBusinessId, uid);
+    }
+
+    // Compatibility for owner app versions that created the business first but
+    // did not yet write role/isActive into users/{uid}. New code writes both.
+    function validLegacyOwnerProfileCreate(uid) {
+      return request.resource.data.keys().hasAll(['uid', 'activeBusinessId']) &&
+        !request.resource.data.keys().hasAny(['role', 'isActive']) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.activeBusinessId is string &&
+        ownsBusinessAs(request.resource.data.activeBusinessId, uid);
+    }
+
+    function validSelfProfileUpdate(uid) {
+      return request.resource.data.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firstName', 'lastName', 'displayName', 'email', 'phone', 'photoUrl',
+          'activeBusinessId', 'createdAt', 'updatedAt'
+        ]) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['activeBusinessId']) ||
+          (
+            request.resource.data.activeBusinessId is string &&
+            ownsBusinessAs(request.resource.data.activeBusinessId, uid)
+          )
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if self(uid);
+      allow create: if self(uid) && (
+        validCustomerProfileCreate(uid) ||
+        validOwnerProfileCreate(uid) ||
+        validLegacyOwnerProfileCreate(uid)
+      );
+      allow update: if self(uid) && validSelfProfileUpdate(uid);
+      allow delete: if false;
+
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if self(uid);
+      }
+
+      match /orders/{orderId} {
+        allow read: if self(uid);
+        allow write: if false;
+      }
+    }
+
+    // Authenticated, active customers discover station documents through a
+    // collection-group query. Private nested resources remain protected below.
+    match /{path=**}/stations/{stationId} {
+      allow read: if isActiveCustomer();
+    }
+
+    match /businesses/{businessId} {
+      allow create: if signedIn() &&
+        request.resource.data.id == businessId &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.isActive == true;
+      allow read: if isMember(businessId);
+      allow update: if ownsBusiness(businessId) &&
+        request.resource.data.ownerUid == resource.data.ownerUid &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if false;
+
+      match /members/{uid} {
+        // The owner must be able to check their own missing membership after
+        // creating the business; otherwise first-registration deadlocks.
+        allow read: if isMember(businessId) ||
+          (self(uid) && ownsBusiness(businessId));
+
+        allow create: if (
+          managesBusiness(businessId) &&
+          request.resource.data.uid == uid &&
+          request.resource.data.role in ['MANAGER', 'STAFF'] &&
+          request.resource.data.isActive is bool &&
+          request.resource.data.stationIds is list
+        ) || (
+          self(uid) &&
+          ownsBusiness(businessId) &&
+          request.resource.data.uid == uid &&
+          request.resource.data.role == 'OWNER' &&
+          request.resource.data.isActive == true &&
+          request.resource.data.stationIds is list
+        );
+
+        // Managers may maintain non-owner staff, but cannot create/promote an
+        // owner or alter the owner's membership document.
+        allow update: if managesBusiness(businessId) &&
+          resource.data.role != 'OWNER' &&
+          request.resource.data.role in ['MANAGER', 'STAFF'] &&
+          request.resource.data.uid == uid;
+        allow delete: if false;
+      }
+
+      match /stations/{stationId} {
+        allow read: if stationAccess(businessId, stationId);
+        allow create, update: if managesBusiness(businessId) &&
+          request.resource.data.id == stationId &&
+          request.resource.data.businessId == businessId;
+        allow delete: if false;
+
+        match /customers/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /customerAddresses/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /products/{id} {
+          allow read: if operatesStation(businessId, stationId) || isActiveCustomer();
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /riders/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /orders/{id} {
+          allow read: if operatesStation(businessId, stationId) ||
+            (signedIn() && resource.data.customerUid == request.auth.uid);
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /containerInventory/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create, update: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow delete: if false;
+        }
+
+        match /containerMovements/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId);
+          allow update, delete: if false;
+        }
+
+        match /payments/{id} {
+          allow read: if operatesStation(businessId, stationId);
+          allow create: if operatesStation(businessId, stationId) &&
+            belongsToStation(stationId) &&
+            request.resource.data.paymentMethod in ['CASH', 'CASH_ON_DELIVERY'];
+          allow update: if managesBusiness(businessId) &&
+            belongsToStation(stationId) &&
+            request.resource.data.stationId == resource.data.stationId &&
+            request.resource.data.amountCentavos == resource.data.amountCentavos &&
+            request.resource.data.paymentMethod == resource.data.paymentMethod;
+          allow delete: if false;
+        }
+      }
+
+      // Trusted billing backend only. Android clients cannot assert paid plans.
+      match /subscription/{document=**} {
+        allow read: if isMember(businessId);
+        allow write: if false;
+      }
+    }
+
+    match /subscriptionPlans/{planId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Callable Functions use the Admin SDK for these backend-only resources.
+    match /customerOrderRequests/{id} {
+      allow read, write: if false;
+    }
+
+    match /auditEvents/{id} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
