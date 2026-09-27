@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SavedAddressDao {
-    @Query("SELECT * FROM saved_addresses ORDER BY id ASC")
-    fun getAll(): Flow<List<SavedAddressEntity>>
+    @Query("SELECT * FROM saved_addresses WHERE ownerUid = :ownerUid ORDER BY id ASC")
+    fun getAll(ownerUid: String): Flow<List<SavedAddressEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(address: SavedAddressEntity): Long
@@ -18,8 +18,8 @@ interface SavedAddressDao {
     @Query("DELETE FROM saved_addresses WHERE id = :id")
     suspend fun delete(id: Long)
 
-    @Query("DELETE FROM saved_addresses WHERE addressLine = :addressLine")
-    suspend fun deleteByAddressLine(addressLine: String)
+    @Query("DELETE FROM saved_addresses WHERE ownerUid = :ownerUid AND addressLine = :addressLine")
+    suspend fun deleteByAddressLine(ownerUid: String, addressLine: String)
 
     @Query("DELETE FROM saved_addresses")
     suspend fun clear()

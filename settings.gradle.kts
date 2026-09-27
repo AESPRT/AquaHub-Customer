@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AquaHub - Customer"
+rootProject.name = "AquaHub – Water Delivery"
 include(":app")
  

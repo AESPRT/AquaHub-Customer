@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -27,12 +28,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.*
 import com.aesprt.aquahub_customer.ui.theme.*
+import coil.compose.AsyncImage
 
 /**
  * ProductCard:
@@ -67,27 +71,36 @@ fun ProductCard(
                     .background(
                         when (product.type) {
                             ProductType.REFILL -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
-                            ProductType.NEW_CONTAINER -> Color(0xFFE0F2FE)
-                            ProductType.EMPTY_CONTAINER -> Color(0xFFDCFCE7)
-                            ProductType.OTHER -> Color(0xFFF1F5F9)
+                            ProductType.NEW_CONTAINER -> MaterialTheme.colorScheme.secondaryContainer
+                            ProductType.EMPTY_CONTAINER -> MaterialTheme.colorScheme.tertiaryContainer
+                            ProductType.OTHER -> MaterialTheme.colorScheme.surfaceVariant
                         }
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = when (product.type) {
-                        ProductType.REFILL -> Icons.Outlined.WaterDrop
-                        ProductType.NEW_CONTAINER -> Icons.Outlined.ShoppingBag
-                        ProductType.EMPTY_CONTAINER -> Icons.Outlined.Replay
-                        ProductType.OTHER -> Icons.Outlined.WaterDrop
-                    },
-                    contentDescription = null,
-                    tint = when (product.type) {
-                        ProductType.EMPTY_CONTAINER -> Color(0xFF16A34A)
-                        else -> MaterialTheme.colorScheme.primary
-                    },
-                    modifier = Modifier.size(32.dp)
-                )
+                if (!product.imagePath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = product.imagePath,
+                        contentDescription = product.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = when (product.type) {
+                            ProductType.REFILL -> Icons.Outlined.WaterDrop
+                            ProductType.NEW_CONTAINER -> Icons.Outlined.ShoppingBag
+                            ProductType.EMPTY_CONTAINER -> Icons.Outlined.Replay
+                            ProductType.OTHER -> Icons.Outlined.WaterDrop
+                        },
+                        contentDescription = null,
+                        tint = when (product.type) {
+                            ProductType.EMPTY_CONTAINER -> MaterialTheme.colorScheme.onTertiaryContainer
+                            else -> MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
@@ -133,13 +146,42 @@ fun ProductCard(
                     )
                 }
 
-                Text(
-                    text = product.price.format(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+                val displayQuantity = currentQuantity.coerceAtLeast(1)
+                val effectivePrice = product.unitPriceFor(displayQuantity)
+                product.promotion?.takeIf { it.isLive() }?.let { promotion ->
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.padding(top = 5.dp)
+                    ) {
+                        Text(
+                            if (promotion.minimumQuantity > 1) "${promotion.label} · Buy ${promotion.minimumQuantity}+" else promotion.label,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = effectivePrice.format(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (effectivePrice != product.price) {
+                        Text(
+                            text = product.price.format(),
+                            style = MaterialTheme.typography.labelMedium.copy(textDecoration = TextDecoration.LineThrough),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -256,11 +298,11 @@ fun CartItemCard(
  */
 @Composable
 fun OrderSummaryCard(
+    modifier: Modifier = Modifier,
     subtotal: Money,
     deliveryFee: Money,
     discount: Money = Money.Zero,
-    total: Money,
-    modifier: Modifier = Modifier
+    total: Money
 ) {
     AquaHubGlassCard(
         modifier = modifier.fillMaxWidth(),

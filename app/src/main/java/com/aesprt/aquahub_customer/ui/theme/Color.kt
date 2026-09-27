@@ -7,12 +7,13 @@ import androidx.compose.runtime.Composable
 
 // AquaHub Primary Brand Palette
 val AquaPrimary = Color(0xFF1264E6)
-val AquaPrimaryDark = Color(0xFF073B8C)
+// Keep the owner app's dark-theme primary token name and value.
+val AquaPrimaryDark = Color(0xFF3B82F6)
 val AquaCyan = Color(0xFF16C7E8)
 val AquaCyanSoft = Color(0xFF81E6F2)
 val NavyDeep = Color(0xFF073B8C)
 val LightAqua = Color(0xFFDFF8FC)
-val AquaBackground = Color(0xFFF4F9FF)
+val AquaBackground = Color(0xFFF5FAFF)
 val AquaSurface = Color(0xFFFFFFFF)
 
 // Semantic Status Colors
@@ -41,12 +42,13 @@ val BackgroundDark = Color(0xFF0B132B)
 val SurfaceDark = Color(0xFF1C2541)
 val SurfaceContainerDark = Color(0xFF243054)
 val NavyDark = Color(0xFF071426)
-val AquaPrimaryLight = Color(0xFF3B82F6)
+// Compatibility alias for existing customer theme references.
+val AquaPrimaryLight = AquaPrimaryDark
 
 // Glassmorphism & Translucent Accents
-val GlassWhite = Color(0xEBFFFFFF)
-val GlassWhiteSubtle = Color(0xB8FFFFFF)
-val GlassBorder = Color(0x66FFFFFF)
+val GlassWhite = Color(0xCCFFFFFF)
+val GlassWhiteSubtle = Color(0x99FFFFFF)
+val GlassBorder = Color(0x4DFFFFFF)
 val AquaBorder = Color(0x261264E6)
 val GlassBorderAqua = Color(0x3316C7E8)
 val GlassDark = Color(0xCC1C2541)

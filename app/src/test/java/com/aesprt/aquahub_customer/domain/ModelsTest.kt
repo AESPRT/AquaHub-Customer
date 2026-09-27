@@ -64,12 +64,45 @@ class ModelsTest {
             station(openingTime = null, closingTime = null, isAcceptingOrders = false)
                 .isOpenAt(LocalTime.NOON),
         )
+        assertFalse(
+            station(openingTime = null, closingTime = null, isOpen = false)
+                .isOpenAt(LocalTime.NOON),
+        )
+    }
+
+    @Test
+    fun `manual open override keeps station open outside configured hours`() {
+        assertTrue(
+            station(
+                openingTime = "7:00 AM",
+                closingTime = "6:00 PM",
+                manualOpenOverride = true,
+            ).isOpenAt(LocalTime.of(22, 0)),
+        )
+    }
+
+    @Test
+    fun `station ordering link keeps public code and acquisition source`() {
+        val link = PendingStationLink.parse("https://aquahub.aesprt.com/s/ABC12345?source=qr")
+
+        assertEquals("ABC12345", link?.publicStationCode)
+        assertEquals(CustomerAcquisitionSource.STATION_QR, link?.source)
+    }
+
+    @Test
+    fun `malformed station ordering link is rejected`() {
+        assertEquals(null, PendingStationLink.parse("https://aquahub.aesprt.com/s/abc"))
+        assertEquals("ABC12345", PendingStationLink.parse("https://order.aquahub.app/s/ABC12345")?.publicStationCode)
+        assertEquals("ABC12345", PendingStationLink.parse("\u200BABC12345")?.publicStationCode)
+        assertEquals(null, PendingStationLink.parse("https://example.com/s/ABC12345"))
     }
 
     private fun station(
         openingTime: String?,
         closingTime: String?,
         isAcceptingOrders: Boolean = true,
+        isOpen: Boolean = true,
+        manualOpenOverride: Boolean = false,
     ) = PublicStation(
         id = "station",
         businessId = "business",
@@ -83,5 +116,7 @@ class ModelsTest {
         deliveryRadiusKm = 5.0,
         deliveryFee = Money.Zero,
         estimatedPreparationMinutes = 15,
+        isOpen = isOpen,
+        manualOpenOverride = manualOpenOverride,
     )
 }

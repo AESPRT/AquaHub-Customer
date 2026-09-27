@@ -1,5 +1,13 @@
 package com.aesprt.aquahub_customer.ui.feature.profile
 
+import android.content.res.Configuration
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings as AndroidSettings
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,6 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import com.aesprt.aquahub_customer.data.AquaHubLinks
 import com.aesprt.aquahub_customer.domain.*
 import com.aesprt.aquahub_customer.ui.CustomerUiState
 import com.aesprt.aquahub_customer.ui.CustomerViewModel
@@ -33,7 +44,12 @@ import com.aesprt.aquahub_customer.ui.components.AquaHubGlassCard
 import com.aesprt.aquahub_customer.ui.components.AquaPrimaryButton
 import com.aesprt.aquahub_customer.ui.components.AquaSecondaryButton
 import com.aesprt.aquahub_customer.ui.components.CustomerLocationPickerDialog
+import com.aesprt.aquahub_customer.ui.feature.station.StationQrScannerActivity
 import com.aesprt.aquahub_customer.ui.theme.*
+import com.aesprt.aquahub_customer.data.preferences.ThemeMode
+import com.aesprt.aquahub_customer.data.preferences.ThemePreferences
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
 @Composable
 fun ProfileScreen(
@@ -42,12 +58,20 @@ fun ProfileScreen(
     modifier: Modifier = Modifier
 ) {
     ProfileContent(
+        themePreferences = koinInject(),
         state = state,
         onUpdateProfile = { name, phone -> viewModel.updateProfile(name, phone) },
         onSelectAddress = { index -> viewModel.selectSavedAddress(index) },
         onDeleteAddress = { index -> viewModel.deleteSavedAddress(index) },
         onAddAddress = { address -> viewModel.addSavedAddress(address) },
         onSignOut = { viewModel.signOut() },
+        deletingAccount = state.deletingAccount,
+        onDeleteAccount = { viewModel.deleteAccount() },
+        accountError = state.authError,
+        onDismissAccountError = { viewModel.clearAuthError() },
+        onReauthenticateEmail = { email, password -> viewModel.reauthenticateEmail(email, password) { viewModel.deleteAccount() } },
+        onBeginGoogleReauthentication = { viewModel.reauthenticateGoogle { viewModel.deleteAccount() } },
+        onScanStationQrResult = viewModel::handleIncomingLink,
         locationPickerDialog = { initialAddress, initialLocation, onDismiss, onConfirm ->
             CustomerLocationPickerDialog(
                 state = state,
@@ -72,6 +96,14 @@ fun ProfileContent(
     onDeleteAddress: (Int) -> Unit,
     onAddAddress: (DeliveryAddress) -> Unit,
     onSignOut: () -> Unit,
+    themePreferences: ThemePreferences,
+    deletingAccount: Boolean = false,
+    onDeleteAccount: () -> Unit = {},
+    accountError: String? = null,
+    onDismissAccountError: () -> Unit = {},
+    onReauthenticateEmail: (String, String) -> Unit = { _, _ -> },
+    onBeginGoogleReauthentication: () -> Unit = {},
+    onScanStationQrResult: (String) -> Unit = {},
     locationPickerDialog: (@Composable (
         initialAddress: String?,
         initialLocation: GeoPoint?,
@@ -91,6 +123,33 @@ fun ProfileContent(
     var showAddAddressDialog by remember { mutableStateOf(false) }
     var showAddressLocationPicker by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showLegalDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showFinalDeleteDialog by remember { mutableStateOf(false) }
+    var showAccountErrorDialog by remember(accountError) { mutableStateOf(accountError != null) }
+    var showReauthDialog by remember { mutableStateOf(false) }
+    var reauthEmail by remember(state.profile?.email) { mutableStateOf(state.profile?.email.orEmpty()) }
+    var reauthPassword by remember { mutableStateOf("") }
+    val themeMode by themePreferences.mode.collectAsState(initial = ThemeMode.SYSTEM)
+    val themeScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val stationQrScannerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            result.data?.getStringExtra(StationQrScannerActivity.EXTRA_STATION_LINK)
+                ?.let(onScanStationQrResult)
+        }
+    }
+
+    fun openExternalUrl(url: String) {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }.onFailure {
+            showSupportDialog = true
+        }
+    }
 
     // Add address form state
     var newAddressLabel by remember { mutableStateOf("Home") }
@@ -272,11 +331,32 @@ fun ProfileContent(
             if (state.savedAddresses.isEmpty()) {
                 item {
                     AquaHubGlassCard(shape = AquaHubShapes.cardSecondary) {
-                        Text(
-                            text = "No saved addresses yet. Add one for quick checkout!",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(15.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Outlined.AddLocationAlt, null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("Add your first address", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Save a precise map pin for faster, more reliable delivery.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            FilledIconButton(onClick = { showAddAddressDialog = true }) {
+                                Icon(Icons.Outlined.Add, contentDescription = "Add delivery address")
+                            }
+                        }
                     }
                 }
             } else {
@@ -361,6 +441,108 @@ fun ProfileContent(
                 }
             }
 
+            // Appearance
+            item {
+                Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
+            item {
+                AquaHubGlassCard(shape = AquaHubShapes.cardSecondary) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Outlined.Palette, null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(Modifier.padding(start = 12.dp)) {
+                                Text("App theme", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Choose the display that feels best to you",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ThemeMode.entries.forEach { option ->
+                                ThemeModeButton(
+                                    option = option,
+                                    selected = themeMode == option,
+                                    onClick = { themeScope.launch { themePreferences.setMode(option) } },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Preferences, privacy & support
+            item {
+                Text(
+                    text = "Preferences & Privacy",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            item {
+                AquaHubGlassCard(shape = AquaHubShapes.cardSecondary) {
+                    ProfileSettingRow(
+                        icon = Icons.Outlined.QrCodeScanner,
+                        title = "Scan station QR",
+                        subtitle = if (state.isStationOwnedCustomer) {
+                            "Switch your preferred station by scanning its QR code"
+                        } else {
+                            "Link this account to your preferred water station"
+                        },
+                        onClick = {
+                            stationQrScannerLauncher.launch(
+                                Intent(context, StationQrScannerActivity::class.java)
+                            )
+                        }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    ProfileSettingRow(
+                        icon = Icons.Outlined.NotificationsNone,
+                        title = "Notifications",
+                        subtitle = "Manage order updates in Android settings",
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(
+                                        AndroidSettings.EXTRA_APP_PACKAGE,
+                                        context.packageName
+                                    )
+                                )
+                            }.onFailure { showSupportDialog = true }
+                        }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    ProfileSettingRow(
+                        icon = Icons.Outlined.Security,
+                        title = "Privacy & Security",
+                        subtitle = "Account data, sign-in, and deletion",
+                        onClick = { showPrivacyDialog = true }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    ProfileSettingRow(
+                        icon = Icons.Outlined.Description,
+                        title = "Legal",
+                        subtitle = "Privacy Policy, Terms, and Support",
+                        onClick = { showLegalDialog = true }
+                    )
+                }
+            }
+
             // Settings & Support Section
             item {
                 Text(
@@ -442,6 +624,19 @@ fun ProfileContent(
                 }
             }
 
+            // Delete Account
+            item {
+                AquaSecondaryButton(
+                    text = "Delete Account",
+                    onClick = { showDeleteDialog = true },
+                    icon = Icons.Outlined.DeleteForever,
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.20f),
+                    contentColor = MaterialTheme.colorScheme.error,
+                    borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             // Sign Out Button
             item {
                 AquaSecondaryButton(
@@ -491,24 +686,30 @@ fun ProfileContent(
                         }
                     }
 
-                    OutlinedTextField(
-                        value = newAddressLine,
-                        onValueChange = {},
-                        label = { Text("Complete Address") },
-                        placeholder = { Text("Search and pin the address") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showAddressLocationPicker = true },
-                        readOnly = true,
-                        maxLines = 3,
-                        shape = AquaHubShapes.button,
-                        leadingIcon = { Icon(Icons.Outlined.LocationOn, contentDescription = null) },
-                        trailingIcon = {
-                            IconButton(onClick = { showAddressLocationPicker = true }) {
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = newAddressLine,
+                            onValueChange = {},
+                            label = { Text("Complete Address") },
+                            placeholder = { Text("Search and pin the address") },
+                            modifier = Modifier.fillMaxWidth(),
+                            readOnly = true,
+                            maxLines = 3,
+                            shape = AquaHubShapes.button,
+                            leadingIcon = { Icon(Icons.Outlined.LocationOn, contentDescription = null) },
+                            trailingIcon = {
                                 Icon(Icons.Outlined.Map, contentDescription = "Search address on map")
-                            }
-                        },
-                    )
+                            },
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable(
+                                    onClick = { showAddressLocationPicker = true },
+                                    role = Role.Button,
+                                ),
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -602,6 +803,120 @@ fun ProfileContent(
         )
     }
 
+    if (showPrivacyDialog) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyDialog = false },
+            title = { Text("Privacy & Security", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "AquaHub uses your account, phone number, and delivery location to authenticate you, calculate delivery eligibility, and fulfill orders. Your private profile and device token are removed when account deletion succeeds. Station transaction history may be retained with personal details anonymized."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacyDialog = false }) { Text("Got it") }
+            }
+        )
+    }
+
+    if (showLegalDialog) {
+        AlertDialog(
+            onDismissRequest = { showLegalDialog = false },
+            title = { Text("AquaHub Legal", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Open the official documents for this build.", style = MaterialTheme.typography.bodyMedium)
+                    AquaHubLinks.privacyPolicy?.let { url ->
+                        TextButton(onClick = { showLegalDialog = false; openExternalUrl(url) }) {
+                            Text("Privacy Policy")
+                        }
+                    }
+                    AquaHubLinks.terms?.let { url ->
+                        TextButton(onClick = { showLegalDialog = false; openExternalUrl(url) }) {
+                            Text("Terms of Service")
+                        }
+                    }
+                    AquaHubLinks.support?.let { url ->
+                        TextButton(onClick = { showLegalDialog = false; openExternalUrl(url) }) {
+                            Text("Support")
+                        }
+                    }
+                    if (AquaHubLinks.privacyPolicy == null && AquaHubLinks.terms == null && AquaHubLinks.support == null) {
+                        Text(
+                            "Official legal links are not configured for this build. Please contact AquaHub support.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLegalDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete your AquaHub account?") },
+            text = { Text("Your personal profile, saved addresses, device tokens, and private account data will be permanently removed. Completed station order history will be retained with personal details anonymized. This cannot be undone.") },
+            confirmButton = { TextButton(onClick = { showDeleteDialog = false; showFinalDeleteDialog = true }) { Text("Continue", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } }
+        )
+    }
+    if (showFinalDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!deletingAccount) showFinalDeleteDialog = false },
+            title = { Text("Permanently delete account?") },
+            text = { Text("This final confirmation deletes your AquaHub identity and cloud data. You will be signed out when deletion succeeds.") },
+            confirmButton = { TextButton(enabled = !deletingAccount, onClick = { onDeleteAccount() }) { Text(if (deletingAccount) "Deleting…" else "Delete permanently", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(enabled = !deletingAccount, onClick = { showFinalDeleteDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showAccountErrorDialog && accountError != null) {
+        AlertDialog(
+            onDismissRequest = { showAccountErrorDialog = false; onDismissAccountError() },
+            title = { Text("Account deletion failed", fontWeight = FontWeight.Bold) },
+            text = { Text(accountError, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAccountErrorDialog = false
+                    onDismissAccountError()
+                    if (accountError.contains("sign in again", ignoreCase = true)) showReauthDialog = true else showFinalDeleteDialog = true
+                }) {
+                    Text("Try again", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showAccountErrorDialog = false; onDismissAccountError() }) { Text("Close") } }
+        )
+    }
+
+    if (showReauthDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!state.authLoading) showReauthDialog = false },
+            title = { Text("Verify your identity") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("For your security, sign in again before deleting your account.", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(reauthEmail, { reauthEmail = it }, label = { Text("Email") }, leadingIcon = { Icon(Icons.Outlined.Email, null) }, singleLine = true)
+                    OutlinedTextField(reauthPassword, { reauthPassword = it }, label = { Text("Password") }, leadingIcon = { Icon(Icons.Outlined.Lock, null) }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !state.authLoading, onClick = { showReauthDialog = false; onReauthenticateEmail(reauthEmail, reauthPassword) }) {
+                    Text(if (state.authLoading) "Checking…" else "Verify and continue")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(enabled = !state.authLoading, onClick = { showReauthDialog = false }) { Text("Cancel") }
+                    TextButton(enabled = !state.authLoading, onClick = { showReauthDialog = false; onBeginGoogleReauthentication() }) { Text("Use Google") }
+                }
+            }
+        )
+    }
+
     // Sign Out Confirmation Dialog
     if (showSignOutDialog) {
         AlertDialog(
@@ -642,7 +957,68 @@ fun ProfileContent(
     }
 }
 
-@Preview(showBackground = true)
+@Composable
+private fun ThemeModeButton(
+    option: ThemeMode,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val icon = when (option) {
+        ThemeMode.SYSTEM -> Icons.Outlined.SettingsBrightness
+        ThemeMode.LIGHT -> Icons.Outlined.LightMode
+        ThemeMode.DARK -> Icons.Outlined.DarkMode
+    }
+    val label = option.name.lowercase().replaceFirstChar(Char::uppercase)
+    Surface(
+        modifier = modifier
+            .height(76.dp)
+            .clickable(role = Role.RadioButton, onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        border = androidx.compose.foundation.BorderStroke(
+            if (selected) 1.5.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(icon, null, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(5.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun ProfileSettingRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ProfileScreenPreview() {
     val sampleState = CustomerUiState(
@@ -671,6 +1047,7 @@ private fun ProfileScreenPreview() {
 
     AquaHubCustomerTheme(dynamicColor = false) {
         ProfileContent(
+        themePreferences = koinInject(),
             state = sampleState,
             onUpdateProfile = { _, _ -> },
             onSelectAddress = {},
@@ -680,4 +1057,3 @@ private fun ProfileScreenPreview() {
         )
     }
 }
-

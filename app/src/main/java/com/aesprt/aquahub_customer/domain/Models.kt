@@ -68,7 +68,63 @@ data class CustomerProfile(
     val email: String?,
     val phone: String,
     val photoUrl: String? = null,
+    val address: DeliveryAddress? = null,
+    val setupComplete: Boolean = false,
+    val emailVerified: Boolean = false,
+    val preferredBusinessId: String? = null,
+    val preferredStationId: String? = null,
+    val acquisitionSource: CustomerAcquisitionSource = CustomerAcquisitionSource.UNKNOWN,
+    val acquiredAt: Long? = null,
 )
+
+enum class CustomerAcquisitionSource {
+    STATION_QR,
+    STATION_LINK,
+    OWNER_REFERRAL,
+    ORGANIC_APP,
+    SEARCH,
+    UNKNOWN;
+
+    val isStationOwned: Boolean
+        get() = this == STATION_QR || this == STATION_LINK || this == OWNER_REFERRAL
+
+    companion object {
+        fun fromString(value: String?): CustomerAcquisitionSource =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: UNKNOWN
+    }
+}
+
+data class PendingStationLink(
+    val publicStationCode: String,
+    val source: CustomerAcquisitionSource = CustomerAcquisitionSource.STATION_LINK,
+) {
+    companion object {
+        private val route = Regex("^/s/([A-Za-z0-9_-]{6,64})/?$")
+        private val supportedHosts = setOf("aquahub.aesprt.com", "order.aquahub.app")
+
+        fun parse(rawUri: String?): PendingStationLink? {
+            val normalized = rawUri.orEmpty()
+                .trim()
+                .replace("\u200B", "")
+                .removePrefix("\uFEFF")
+            if (Regex("^[A-Za-z0-9_-]{6,64}$").matches(normalized)) {
+                return PendingStationLink(normalized, CustomerAcquisitionSource.STATION_QR)
+            }
+            val uri = runCatching { java.net.URI(normalized) }.getOrNull() ?: return null
+            if (uri.scheme.lowercase(Locale.US) != "https" || uri.host.lowercase(Locale.US) !in supportedHosts) return null
+            val path = uri.path ?: return null
+            val match = route.matchEntire(path) ?: return null
+            val source = when (uri.rawQuery.orEmpty().split('&')
+                .firstOrNull { it.substringBefore('=').equals("source", ignoreCase = true) }
+                ?.substringAfter('=', "")?.uppercase(Locale.US)) {
+                "QR", "STATION_QR" -> CustomerAcquisitionSource.STATION_QR
+                "REFERRAL", "OWNER_REFERRAL" -> CustomerAcquisitionSource.OWNER_REFERRAL
+                else -> CustomerAcquisitionSource.STATION_LINK
+            }
+            return PendingStationLink(match.groupValues[1], source)
+        }
+    }
+}
 
 data class DeliveryAddress(
     val label: String,
@@ -90,18 +146,32 @@ data class PublicStation(
     val deliveryRadiusKm: Double,
     val deliveryFee: Money,
     val estimatedPreparationMinutes: Int,
+    val isOpen: Boolean = true,
+    val manualOpenOverride: Boolean = false,
     val logoPath: String? = null,
     val isFromCache: Boolean = false,
     val averageRating: Float? = null,
     val ratingCount: Int = 0,
     val businessRulesText: String? = null,
     val businessRulesVersion: Long = 0L,
+    val publicStationCode: String? = null,
+    val cashPaymentEnabled: Boolean = true,
+    val codPaymentEnabled: Boolean = true,
+    val gcashPaymentEnabled: Boolean = false,
+    val gcashAccountName: String? = null,
+    val gcashAccountNumber: String? = null,
+    val gcashQrImagePath: String? = null,
+    val mayaPaymentEnabled: Boolean = false,
+    val mayaAccountName: String? = null,
+    val mayaAccountNumber: String? = null,
+    val mayaQrImagePath: String? = null,
 ) {
     fun distanceKmFrom(origin: GeoPoint?): Double? =
         if (origin == null || location == null) null else origin.distanceKmTo(location)
 
     fun isOpenAt(time: LocalTime): Boolean {
-        if (!isAcceptingOrders) return false
+        if (!isOpen || !isAcceptingOrders) return false
+        if (manualOpenOverride) return true
         val opens = openingTime.toStationTimeOrNull() ?: return true
         val closes = closingTime.toStationTimeOrNull() ?: return true
         if (opens == closes) return true
@@ -146,15 +216,50 @@ data class PublicProduct(
     val imagePath: String?,
     val price: Money,
     val isAvailable: Boolean,
+    val promotion: PublicPromotion? = null,
 )
+
+enum class PublicPromotionType { PERCENTAGE, FIXED_PRICE, QUANTITY_BREAK }
+
+data class PublicPromotion(
+    val label: String,
+    val type: PublicPromotionType,
+    val percentBps: Int? = null,
+    val promotionalPrice: Money? = null,
+    val minimumQuantity: Int = 1,
+    val startsAt: Long = 0L,
+    val endsAt: Long? = null,
+) {
+    fun isLive(now: Long = System.currentTimeMillis()): Boolean =
+        startsAt <= now && (endsAt == null || endsAt > now)
+
+    fun applies(quantity: Int, now: Long = System.currentTimeMillis()): Boolean =
+        quantity >= minimumQuantity && isLive(now)
+}
+
+fun PublicProduct.unitPriceFor(quantity: Int): Money {
+    val offer = promotion?.takeIf { it.applies(quantity) } ?: return price
+    return when (offer.type) {
+        PublicPromotionType.FIXED_PRICE -> offer.promotionalPrice ?: price
+        PublicPromotionType.PERCENTAGE, PublicPromotionType.QUANTITY_BREAK -> {
+            val bps = offer.percentBps ?: return price
+            Money((price.centavos * (10_000L - bps) + 5_000L) / 10_000L)
+        }
+    }
+}
 
 data class CartLine(val product: PublicProduct, val quantity: Int) {
     init { require(quantity in 1..99) }
-    val subtotal: Money get() = product.price * quantity
+    val subtotal: Money get() = product.unitPriceFor(quantity) * quantity
 }
 
 enum class DeliveryMode { DELIVERY, PICKUP }
-enum class PaymentMethod { CASH_ON_DELIVERY, CASH }
+enum class PaymentMethod(val label: String) {
+    CASH_ON_DELIVERY("Cash on Delivery"),
+    CASH("Cash on Pickup"),
+    GCASH("GCash"),
+    MAYA("Maya")
+}
 
 enum class OrderStatus(val label: String) {
     PENDING("Pending"),
@@ -194,6 +299,7 @@ data class CustomerOrder(
     val total: Money,
     val status: OrderStatus,
     val deliveryMode: DeliveryMode,
+    val paymentMethod: PaymentMethod = if (deliveryMode == DeliveryMode.DELIVERY) PaymentMethod.CASH_ON_DELIVERY else PaymentMethod.CASH,
     val deliveryAddress: String,
     val deliveryLocation: GeoPoint? = null,
     val customerNote: String?,

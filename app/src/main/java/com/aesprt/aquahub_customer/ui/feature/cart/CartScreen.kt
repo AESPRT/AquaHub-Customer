@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.feature.cart
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -19,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.*
 import com.aesprt.aquahub_customer.ui.CustomerUiState
 import com.aesprt.aquahub_customer.ui.CustomerViewModel
@@ -56,7 +56,7 @@ fun CartContent(
     onProceedToCheckout: () -> Unit,
     onExploreStations: () -> Unit,
     onChangeQuantity: (String, Int) -> Unit,
-    onAddProduct: (com.aesprt.aquahub_customer.domain.PublicProduct) -> Unit,
+    onAddProduct: (PublicProduct) -> Unit,
     onClearCart: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -212,8 +212,9 @@ fun CartContent(
                 // Pricing Summary
                 item {
                     OrderSummaryCard(
-                        subtotal = state.subtotal,
+                        subtotal = state.regularSubtotal,
                         deliveryFee = state.deliveryFee,
+                        discount = state.promotionSavings,
                         total = state.total
                     )
                 }
@@ -261,7 +262,8 @@ fun CartContent(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun CartScreenPreview() {
     val sampleStation = PublicStation(
@@ -270,19 +272,19 @@ private fun CartScreenPreview() {
         name = "aquaman Refilling Station",
         phone = "09123456789",
         address = "Bansalangin, Quezon City",
-        location = com.aesprt.aquahub_customer.domain.GeoPoint(14.66, 121.02),
+        location = GeoPoint(14.66, 121.02),
         isAcceptingOrders = true,
         openingTime = "07:00",
         closingTime = "20:00",
         deliveryRadiusKm = 5.0,
-        deliveryFee = com.aesprt.aquahub_customer.domain.Money.fromPesos(25),
+        deliveryFee = Money.fromPesos(25),
         estimatedPreparationMinutes = 30
     )
     val sampleProduct = PublicProduct(
         id = "p-1",
         name = "5 Gallon Round (Refill)",
-        type = com.aesprt.aquahub_customer.domain.ProductType.REFILL,
-        price = com.aesprt.aquahub_customer.domain.Money.fromPesos(50),
+        type = ProductType.REFILL,
+        price = Money.fromPesos(50),
         description = "Purified water refill",
         sizeLabel = "20 Litters",
         imagePath = null,
@@ -290,7 +292,7 @@ private fun CartScreenPreview() {
     )
     val sampleState = CustomerUiState(
         selectedStation = sampleStation,
-        cart = listOf(com.aesprt.aquahub_customer.domain.CartLine(sampleProduct, 2))
+        cart = listOf(CartLine(sampleProduct, 2))
     )
     AquaHubCustomerTheme(dynamicColor = false) {
         CartContent(

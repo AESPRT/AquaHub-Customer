@@ -35,8 +35,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aesprt.aquahub_customer.ui.components.AquaLoadingStateView
 import com.aesprt.aquahub_customer.ui.feature.auth.AuthScreen
+import com.aesprt.aquahub_customer.ui.feature.auth.EmailVerificationScreen
+import com.aesprt.aquahub_customer.ui.feature.profile.CompleteProfileScreen
 import com.aesprt.aquahub_customer.ui.feature.onboarding.OnboardingScreen
 import com.aesprt.aquahub_customer.ui.feature.splash.SplashScreen
+import com.aesprt.aquahub_customer.ui.feature.station.StationLinkRequiredScreen
 import com.aesprt.aquahub_customer.ui.navigation.CustomerBottomDestination
 import com.aesprt.aquahub_customer.ui.navigation.CustomerDestinations
 import com.aesprt.aquahub_customer.ui.navigation.CustomerNavGraph
@@ -49,11 +52,22 @@ import org.koin.androidx.compose.koinViewModel
  * Splash -> (First-time Onboarding) -> (Authentication) -> Main App Shell (with Bottom Nav).
  */
 @Composable
-fun CustomerApp(viewModel: CustomerViewModel = koinViewModel()) {
+fun CustomerApp(
+    incomingLink: String? = null,
+    onIncomingLinkConsumed: () -> Unit = {},
+    viewModel: CustomerViewModel = koinViewModel(),
+) {
     val state by viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var splashCompleted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(incomingLink) {
+        incomingLink?.let {
+            viewModel.handleIncomingLink(it)
+            onIncomingLinkConsumed()
+        }
+    }
 
     LaunchedEffect(state.message) {
         state.message?.let { msg ->
@@ -68,10 +82,13 @@ fun CustomerApp(viewModel: CustomerViewModel = koinViewModel()) {
             .background(MaterialTheme.colorScheme.background)
     ) {
         AnimatedContent(
-            targetState = Triple(splashCompleted, state.sessionReady, state.profile != null),
+            targetState = Triple(splashCompleted, state.sessionReady, state.profile),
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = "appStateTransition"
-        ) { (splashDone, ready, signedIn) ->
+        ) { (splashDone, ready, profile) ->
+            val signedIn = profile != null
+            val emailVerified = profile?.emailVerified == true
+            val setupComplete = profile?.setupComplete == true
             when {
                 // 1. Animated Splash Screen
                 !splashDone -> {
@@ -95,11 +112,28 @@ fun CustomerApp(viewModel: CustomerViewModel = koinViewModel()) {
                     )
                 }
 
-                // 4. Authentication (Google Sign-In)
+                // 4. Authentication
                 !signedIn -> {
                     AuthScreen(
                         firebaseConfigured = state.firebaseConfigured,
                         viewModel = viewModel
+                    )
+                }
+
+                signedIn && !emailVerified -> {
+                    EmailVerificationScreen(viewModel)
+                }
+
+                signedIn && !setupComplete -> {
+                    CompleteProfileScreen(state, viewModel)
+                }
+
+                signedIn && !state.hasLinkedStation -> {
+                    StationLinkRequiredScreen(
+                        state = state,
+                        onStationLinkScanned = viewModel::handleIncomingLink,
+                        onRetry = viewModel::retryPendingStationLink,
+                        onSignOut = viewModel::signOut,
                     )
                 }
 
@@ -191,15 +225,15 @@ private fun CustomerBottomBar(
                 elevation = 16.dp,
                 shape = navShape,
                 spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                ambientColor = Color.Black.copy(alpha = 0.05f)
+                ambientColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
             )
             .border(
                 width = 1.dp,
                 brush = Brush.verticalGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.85f),
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f),
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-                        Color.White.copy(alpha = 0.30f)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                     )
                 ),
                 shape = navShape
@@ -287,7 +321,7 @@ private fun CustomerBottomNavItem(
                         } else {
                             MaterialTheme.colorScheme.error
                         },
-                        contentColor = Color.White
+                        contentColor = if (destination == CustomerBottomDestination.Orders) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onError
                     ) {
                         Text(
                             text = if (badgeCount > 99) "99+" else badgeCount.toString(),
@@ -363,7 +397,7 @@ private fun CustomerBottomBarPreview() {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFFF6F9FA))
+                .background(MaterialTheme.colorScheme.background)
                 .padding(16.dp),
             contentAlignment = Alignment.BottomCenter
         ) {
@@ -376,4 +410,3 @@ private fun CustomerBottomBarPreview() {
         }
     }
 }
-

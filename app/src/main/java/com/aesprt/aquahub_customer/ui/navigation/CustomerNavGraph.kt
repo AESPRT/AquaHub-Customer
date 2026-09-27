@@ -46,7 +46,15 @@ fun CustomerNavGraph(
                 state = state,
                 viewModel = viewModel,
                 onStationClick = { station ->
-                    viewModel.selectStation(station)
+                    if (viewModel.shouldConfirmStationChange(station)) {
+                        viewModel.requestStationChange(station)
+                    } else {
+                        viewModel.selectStation(station, persistPreference = false)
+                        navController.navigate(CustomerDestinations.Station)
+                    }
+                },
+                onConfirmStationChange = { station ->
+                    viewModel.confirmStationChange()
                     navController.navigate(CustomerDestinations.Station)
                 },
                 onOrderClick = { orderId ->
@@ -56,7 +64,7 @@ fun CustomerNavGraph(
                     viewModel.reorder(order) {
                         navController.navigate(CustomerDestinations.Cart)
                     }
-                }
+                },
             )
         }
 
@@ -106,6 +114,9 @@ fun CustomerNavGraph(
         composable(CustomerDestinations.Orders) {
             OrdersListScreen(
                 orders = state.orders,
+                ordersError = state.ordersError,
+                ordersFromCache = state.ordersFromCache,
+                onRetry = viewModel::retryOrders,
                 onOrderClick = { orderId ->
                     navController.navigate(CustomerDestinations.orderTrackingRoute(orderId))
                 },

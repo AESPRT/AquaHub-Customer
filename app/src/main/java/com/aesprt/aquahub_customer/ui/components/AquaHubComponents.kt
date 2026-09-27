@@ -643,7 +643,7 @@ fun AquaLoadingOverlay(
         Surface(
             shape = AquaHubShapes.cardPrimary,
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.7f)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
             shadowElevation = 12.dp,
             modifier = Modifier.padding(32.dp)
         ) {

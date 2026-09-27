@@ -16,6 +16,15 @@ val localProperties = Properties().apply {
 val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY")
     ?: System.getenv("MAPS_API_KEY")
     ?: ""
+val privacyPolicyUrl: String = localProperties.getProperty("AQUAHUB_PRIVACY_POLICY_URL")
+    ?: System.getenv("AQUAHUB_PRIVACY_POLICY_URL")
+    ?: ""
+val termsUrl: String = localProperties.getProperty("AQUAHUB_TERMS_URL")
+    ?: System.getenv("AQUAHUB_TERMS_URL")
+    ?: ""
+val supportUrl: String = localProperties.getProperty("AQUAHUB_SUPPORT_URL")
+    ?: System.getenv("AQUAHUB_SUPPORT_URL")
+    ?: ""
 
 android {
     namespace = "com.aesprt.aquahub_customer"
@@ -26,11 +35,14 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+        versionName = "aqc-1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
+        buildConfigField("String", "MAPS_API_KEY", "\"" + mapsApiKey + "\"")
+        buildConfigField("String", "PRIVACY_POLICY_URL", "\"" + privacyPolicyUrl + "\"")
+        buildConfigField("String", "TERMS_URL", "\"" + termsUrl + "\"")
+        buildConfigField("String", "SUPPORT_URL", "\"" + supportUrl + "\"")
     }
 
     buildTypes {
@@ -61,6 +73,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.coil.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.koin.android)
@@ -68,13 +81,19 @@ dependencies {
     implementation(libs.koin.androidx.compose.navigation)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
-    //noinspection LoginCredentials
-    implementation(libs.play.services.auth)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.google.mlkit.barcode.scanning)
     implementation(libs.play.services.location)
     implementation(libs.play.services.maps)
     implementation(libs.google.places)
     implementation(libs.maps.compose)
     implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(platform(libs.firebase.bom))

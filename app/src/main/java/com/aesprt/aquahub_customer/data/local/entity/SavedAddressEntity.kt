@@ -1,13 +1,18 @@
 package com.aesprt.aquahub_customer.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.aesprt.aquahub_customer.domain.DeliveryAddress
 import com.aesprt.aquahub_customer.domain.GeoPoint
 
-@Entity(tableName = "saved_addresses")
+@Entity(
+    tableName = "saved_addresses",
+    indices = [Index(value = ["ownerUid"])],
+)
 data class SavedAddressEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val ownerUid: String,
     val label: String,
     val addressLine: String,
     val latitude: Double?,
@@ -23,7 +28,8 @@ data class SavedAddressEntity(
     )
 }
 
-fun DeliveryAddress.toEntity() = SavedAddressEntity(
+fun DeliveryAddress.toEntity(ownerUid: String) = SavedAddressEntity(
+    ownerUid = ownerUid,
     label = label,
     addressLine = addressLine,
     latitude = location?.latitude,

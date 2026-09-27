@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -8,13 +9,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Storefront
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -24,6 +25,8 @@ import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.GeoPoint
 import com.aesprt.aquahub_customer.domain.PublicStation
 import com.aesprt.aquahub_customer.ui.theme.*
+import coil.compose.AsyncImage
+import java.time.LocalTime
 
 @Composable
 fun StationCard(
@@ -53,18 +56,27 @@ fun StationCard(
                         Brush.linearGradient(
                             listOf(
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                                LightAqua.copy(alpha = 0.55f)
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
                             )
                         )
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Storefront,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp)
-                )
+                if (!station.logoPath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = station.logoPath,
+                        contentDescription = "${station.name} station image",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Outlined.Storefront,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(34.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
@@ -86,7 +98,7 @@ fun StationCard(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    StationStatusChip(isOpen = station.isAcceptingOrders)
+                    StationStatusChip(isOpen = station.isOpenAt(LocalTime.now()))
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -162,7 +174,8 @@ private fun StationMetric(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun StationCardPreview() {
     val sampleStation = PublicStation(
@@ -190,4 +203,3 @@ private fun StationCardPreview() {
         }
     }
 }
-

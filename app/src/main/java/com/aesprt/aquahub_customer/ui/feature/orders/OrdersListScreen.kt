@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.feature.orders
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.*
 import com.aesprt.aquahub_customer.ui.components.AquaCustomerTopBar
 import com.aesprt.aquahub_customer.ui.components.AquaHubGlassCard
@@ -30,11 +30,14 @@ import java.util.Date
 
 @Composable
 fun OrdersListScreen(
+    modifier: Modifier = Modifier,
     orders: List<CustomerOrder>,
+    ordersError: String? = null,
+    ordersFromCache: Boolean = false,
+    onRetry: () -> Unit = {},
     onOrderClick: (String) -> Unit,
     onReorder: (CustomerOrder) -> Unit,
-    onBrowseStations: () -> Unit,
-    modifier: Modifier = Modifier
+    onBrowseStations: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Active Orders", "Completed")
@@ -60,6 +63,32 @@ fun OrdersListScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (ordersFromCache && orders.isNotEmpty()) {
+                Text(
+                    text = "Showing the last available order history",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            }
+            ordersError?.let { error ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    shape = AquaHubShapes.cardSecondary,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onRetry) { Text("Try again") }
+                    }
+                }
+            }
+
             // Tab Selector
             Surface(
                 modifier = Modifier
@@ -262,7 +291,8 @@ private fun OrderHistoryCard(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun OrdersListScreenPreview() {
     val sampleProduct = PublicProduct(

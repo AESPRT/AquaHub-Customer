@@ -11,11 +11,12 @@ import com.aesprt.aquahub_customer.R
 fun AquaHubLogo(
     modifier: Modifier = Modifier,
     contentDescription: String? = "AquaHub logo",
+    contentScale: ContentScale = ContentScale.Fit,
 ) {
     Image(
-        painter = painterResource(R.drawable.logo),
+        painter = painterResource(R.drawable.aquahub_customer_logo),
         contentDescription = contentDescription,
-        contentScale = ContentScale.Fit,
+        contentScale = contentScale,
         modifier = modifier,
     )
 }

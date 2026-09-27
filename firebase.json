@@ -1,4 +1,13 @@
 {
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "AquaHub",
+        "supportEmail": "adriel.dev.123@gmail.com"
+      }
+    }
+  },
   "functions": [
     {
       "codebase": "default",
@@ -23,6 +32,9 @@
       "indexes": "firestore.indexes.json"
     }
   ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "emulators": {
     "auth": {
       "port": 9099
@@ -32,6 +44,9 @@
     },
     "functions": {
       "port": 5001
+    },
+    "storage": {
+      "port": 9199
     }
   }
 }

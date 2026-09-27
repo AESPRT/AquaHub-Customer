@@ -1,12 +1,12 @@
 package com.aesprt.aquahub_customer.ui.feature.splash
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,15 +14,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.ui.components.AquaHubLogo
 import com.aesprt.aquahub_customer.ui.theme.AquaHubCustomerTheme
 import com.aesprt.aquahub_customer.ui.theme.aquaHeroGradient
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun SplashScreen(
@@ -51,7 +49,7 @@ fun SplashScreen(
     )
 
     LaunchedEffect(Unit) {
-        delay(1200)
+        delay(1200.milliseconds)
         onSplashFinished()
     }
 
@@ -92,34 +90,15 @@ fun SplashScreen(
             ) {
                 AquaHubLogo(
                     contentDescription = "AquaHub Logo",
-                    modifier = Modifier.size(70.dp)
+                    modifier = Modifier.size(50.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "AquaHub",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onPrimary,
-                letterSpacing = (-0.5).sp
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = "PURE WATER DELIVERED",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
-                letterSpacing = 2.sp
-            )
         }
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun SplashScreenPreview() {
     AquaHubCustomerTheme(dynamicColor = false) {

@@ -10,12 +10,15 @@ import com.aesprt.aquahub_customer.domain.DeliveryMode
 import com.aesprt.aquahub_customer.domain.GeoPoint
 import com.aesprt.aquahub_customer.domain.Money
 import com.aesprt.aquahub_customer.domain.OrderRepository
+import com.aesprt.aquahub_customer.domain.OrderSnapshot
 import com.aesprt.aquahub_customer.domain.OrderStatus
+import com.aesprt.aquahub_customer.domain.PaymentMethod
 import com.aesprt.aquahub_customer.domain.ProductType
 import com.aesprt.aquahub_customer.domain.PublicProduct
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.functions.FirebaseFunctionsException
@@ -35,22 +38,32 @@ class FirebaseOrderRepository(
     private val functions: FirebaseFunctions
         get() = FirebaseFunctions.getInstance("asia-southeast1")
 
-    override fun observeOrders(): Flow<List<CustomerOrder>> {
-        if (!configured) return flowOf(emptyList())
+    override fun observeOrders(): Flow<OrderSnapshot> {
+        if (!configured) return flowOf(OrderSnapshot(errorMessage = "Firebase is not configured."))
         return callbackFlow {
             val uid = FirebaseAuth.getInstance().currentUser?.uid
             if (uid == null) {
-                trySend(emptyList())
+                trySend(OrderSnapshot())
                 close()
                 return@callbackFlow
             }
+            var lastGood = emptyList<CustomerOrder>()
             val registration = db.collection("users").document(uid).collection("orders")
                 .orderBy("requestedAt", Query.Direction.DESCENDING)
-                .addSnapshotListener { snapshot, _ ->
-                    trySend(
-                        snapshot?.documents.orEmpty()
-                            .mapNotNull { it.data?.toOrder(it.id) },
-                    )
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        trySend(OrderSnapshot(items = lastGood, isFromCache = lastGood.isNotEmpty(), errorMessage = error.customerMessage()))
+                        return@addSnapshotListener
+                    }
+                    val documents = snapshot?.documents.orEmpty()
+                    val mapped = documents.mapNotNull { it.data?.toOrder(it.id) }
+                    lastGood = mapped
+                    val malformedCount = documents.size - mapped.size
+                    trySend(OrderSnapshot(
+                        items = mapped,
+                        isFromCache = snapshot?.metadata?.isFromCache == true,
+                        errorMessage = malformedCount.takeIf { it > 0 }?.let { "Some order details could not be read. Pull to refresh and try again." },
+                    ))
                 }
             awaitClose { registration.remove() }
         }
@@ -134,6 +147,13 @@ class FirebaseOrderRepository(
             .data as Map<*, *>
 }
 
+private fun FirebaseFirestoreException.customerMessage(): String = when (code) {
+    FirebaseFirestoreException.Code.PERMISSION_DENIED -> "Your order history is not available. Please sign in again or contact support."
+    FirebaseFirestoreException.Code.UNAUTHENTICATED -> "Your session expired. Sign in again to load your orders."
+    FirebaseFirestoreException.Code.UNAVAILABLE, FirebaseFirestoreException.Code.DEADLINE_EXCEEDED -> "Order history is temporarily offline. Showing the last available orders."
+    else -> "Order history could not be loaded. Please try again."
+}
+
 private fun Map<String, Any?>.toOrder(id: String): CustomerOrder? = runCatching {
     val rawItems = this["items"] as? List<Map<String, Any?>> ?: emptyList()
     CustomerOrder(
@@ -167,6 +187,9 @@ private fun Map<String, Any?>.toOrder(id: String): CustomerOrder? = runCatching 
         deliveryMode = runCatching {
             DeliveryMode.valueOf(this["deliveryMode"] as? String ?: "DELIVERY")
         }.getOrDefault(DeliveryMode.DELIVERY),
+        paymentMethod = runCatching {
+            PaymentMethod.valueOf(this["paymentMethod"] as? String ?: "CASH_ON_DELIVERY")
+        }.getOrDefault(PaymentMethod.CASH_ON_DELIVERY),
         deliveryAddress = this["deliveryAddress"] as? String ?: "Station pickup",
         deliveryLocation = ((this["deliveryLatitude"] as? Number)?.toDouble())?.let { latitude ->
             (this["deliveryLongitude"] as? Number)?.toDouble()?.let { longitude ->

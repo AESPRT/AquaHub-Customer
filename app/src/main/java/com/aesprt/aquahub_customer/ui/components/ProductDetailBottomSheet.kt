@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.Money
 import com.aesprt.aquahub_customer.domain.ProductType
 import com.aesprt.aquahub_customer.domain.PublicProduct
+import com.aesprt.aquahub_customer.domain.unitPriceFor
 import com.aesprt.aquahub_customer.ui.theme.*
 
 enum class ContainerSourceOption(val title: String, val description: String) {
@@ -57,7 +58,7 @@ fun ProductDetailBottomSheet(
         )
     }
 
-    val subtotal = selectedProduct.price * quantity
+    val subtotal = selectedProduct.unitPriceFor(quantity) * quantity
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -109,6 +110,27 @@ fun ProductDetailBottomSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
                 )
+            }
+
+            selectedProduct.promotion?.takeIf { it.isLive() }?.let { promotion ->
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text(promotion.label, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (promotion.minimumQuantity > 1) {
+                                "Add ${promotion.minimumQuantity} or more to unlock the promotional price."
+                            } else {
+                                "This promotional price is applied automatically."
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             }
 
             // Size Selector (if multiple sizes available)

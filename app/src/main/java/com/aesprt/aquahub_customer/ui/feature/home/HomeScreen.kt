@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.feature.home
 
+import android.content.res.Configuration
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,7 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,13 +34,13 @@ import com.aesprt.aquahub_customer.ui.CustomerViewModel
 import com.aesprt.aquahub_customer.ui.StationFilter
 import com.aesprt.aquahub_customer.ui.components.*
 import com.aesprt.aquahub_customer.ui.theme.*
-import java.time.LocalTime
 
 @Composable
 fun HomeScreen(
     state: CustomerUiState,
     viewModel: CustomerViewModel,
     onStationClick: (PublicStation) -> Unit,
+    onConfirmStationChange: (PublicStation) -> Unit,
     onOrderClick: (String) -> Unit,
     onReorder: (CustomerOrder) -> Unit,
     modifier: Modifier = Modifier
@@ -79,13 +79,12 @@ fun HomeScreen(
 
     HomeContent(
         state = state,
-        onSearchChange = viewModel::setSearch,
-        onFilterChange = viewModel::setStationFilter,
         onRequestLocationAccess = ::requestLocationAccess,
         onPickLocationClick = { showLocationPicker = true },
         onStationClick = onStationClick,
         onOrderClick = onOrderClick,
         onReorder = onReorder,
+        onRetryStation = viewModel::retryLinkedStation,
         modifier = modifier
     )
 
@@ -103,19 +102,37 @@ fun HomeScreen(
             },
         )
     }
+
+    state.pendingStationSelection?.let { station ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelStationChange,
+            title = { Text("Switch water station?") },
+            text = {
+                Text(
+                    "Your current cart is for ${state.selectedStation?.name ?: "another station"}. " +
+                        "Switching to ${station.name} will clear those items.",
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelStationChange) { Text("Keep cart") }
+            },
+            confirmButton = {
+                Button(onClick = { onConfirmStationChange(station) }) { Text("Switch station") }
+            },
+        )
+    }
 }
 
 @Composable
 fun HomeContent(
+    modifier: Modifier = Modifier,
     state: CustomerUiState,
-    onSearchChange: (String) -> Unit,
-    onFilterChange: (StationFilter) -> Unit,
     onRequestLocationAccess: () -> Unit,
     onPickLocationClick: () -> Unit,
     onStationClick: (PublicStation) -> Unit,
     onOrderClick: (String) -> Unit,
     onReorder: (CustomerOrder) -> Unit,
-    modifier: Modifier = Modifier
+    onRetryStation: () -> Unit = {}
 ) {
     val activeOrder = remember(state.orders) { state.orders.firstOrNull { !it.status.isTerminal } }
     val lastCompletedOrder = remember(state.orders) { state.orders.firstOrNull { it.status.isTerminal } }
@@ -150,23 +167,10 @@ fun HomeContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AquaHubLogo(
-                        modifier = Modifier.size(42.dp),
-                        contentDescription = "AquaHub"
-                    )
-                }
             }
         }
 
-        // Location & Search Header Card
+        // Delivery location for the linked station
         item {
             AquaHubGlassCard(
                 shape = AquaHubShapes.cardPrimary,
@@ -216,7 +220,7 @@ fun HomeContent(
                             onClick = onRequestLocationAccess
                         ) {
                             if (state.locationLoading) {
-                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                AquaLoadingIndicator(Modifier.size(22.dp), size = 22.dp, strokeWidth = 2.dp)
                             } else {
                                 Icon(
                                     imageVector = Icons.Outlined.EditLocationAlt,
@@ -226,12 +230,6 @@ fun HomeContent(
                             }
                         }
                     }
-
-                    AquaSearchBar(
-                        query = state.searchQuery,
-                        onQueryChange = onSearchChange,
-                        placeholder = "Search station, city, or barangay"
-                    )
                 }
             }
         }
@@ -256,128 +254,152 @@ fun HomeContent(
             }
         }
 
+        val preferredStation = state.preferredStation
+        if (preferredStation != null) {
+            item {
+                AquaHubGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = AquaHubShapes.cardPrimary,
+                    backgroundColor = MaterialTheme.colorScheme.surface,
+                    borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "YOUR LINKED STATION",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.1.sp,
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (preferredStation.isAcceptingOrders) {
+                                    Success.copy(alpha = 0.12f)
+                                } else {
+                                    MaterialTheme.colorScheme.errorContainer
+                                },
+                            ) {
+                                Text(
+                                    if (preferredStation.isAcceptingOrders) "Accepting orders" else "Currently closed",
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (preferredStation.isAcceptingOrders) Success else MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Outlined.Storefront, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(modifier = Modifier.padding(start = 14.dp).weight(1f)) {
+                                Text(
+                                    text = preferredStation.name,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                                Text(
+                                    text = preferredStation.address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { onStationClick(preferredStation) },
+                            enabled = preferredStation.isAcceptingOrders,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            Icon(Icons.Outlined.WaterDrop, contentDescription = null)
+                            Text("View products & order", modifier = Modifier.padding(start = 8.dp), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        } else {
+            item {
+                LinkedStationUnavailableCard(
+                    message = state.stationsError
+                        ?: if (state.stationsFromCache) {
+                            "Your station isn't stored on this device yet. Connect once to finish syncing it."
+                        } else {
+                            "We couldn't load your station. Check your connection and try again."
+                        },
+                    onRetry = onRetryStation,
+                )
+            }
+        }
+
         // Stale Cache Banner
-        if (state.stationsFromCache) {
+        if (state.stationsFromCache && preferredStation != null) {
             item { StaleCacheBanner() }
         }
 
-        // Filter chips
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+    }
+}
+
+@Composable
+private fun LinkedStationUnavailableCard(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    AquaHubGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = AquaHubShapes.cardPrimary,
+        backgroundColor = MaterialTheme.colorScheme.surface,
+        borderColor = MaterialTheme.colorScheme.outlineVariant,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
             ) {
-                StationFilter.entries.forEach { filter ->
-                    val isSelected = state.stationFilter == filter
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            onFilterChange(filter)
-                            if (filter == StationFilter.NEAREST && state.location == null) onRequestLocationAccess()
-                        },
-                        label = { Text(filter.label) },
-                        leadingIcon = if (filter == StationFilter.NEAREST) {
-                            { Icon(Icons.Outlined.NearMe, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        } else null,
-                        shape = AquaHubShapes.chip,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    )
-                }
+                Icon(
+                    Icons.Outlined.CloudOff,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(30.dp),
+                )
             }
-        }
-
-        // Section Title
-        val displayedStations = state.displayedStations(LocalTime.now())
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Text(
+                "Station temporarily unavailable",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(16.dp),
             ) {
-                Column {
-                    Text(
-                        text = "Water Refilling Stations",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = if (state.stationFilter == StationFilter.NEAREST) {
-                            "Showing stations within 1 km of your location"
-                        } else {
-                            "Verified AquaHub partners with quality assurance"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = if (state.location == null) "${displayedStations.size} available" else "${displayedStations.size} nearby",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        if (state.stations.isEmpty() && state.locationLoading) {
-            items(3) {
-                StationCardSkeleton()
-            }
-        } else if (displayedStations.isEmpty()) {
-            item {
-                val isNearestNoLocation = state.stationFilter == StationFilter.NEAREST && state.location == null
-                val isNearestEmpty = state.stationFilter == StationFilter.NEAREST && state.location != null
-
-                val emptyTitle = when {
-                    isNearestNoLocation -> "Location needed"
-                    isNearestEmpty -> "No stations within 1 km"
-                    else -> "No refilling stations found"
-                }
-
-                val emptyDescription = when {
-                    state.stationsError != null -> state.stationsError
-                    isNearestNoLocation -> "Set your delivery address or enable GPS to view water refilling stations within 1 km of you."
-                    isNearestEmpty -> "We couldn't find any water stations within 1 km of your current location. Switch to 'All stations' to explore stations in other areas."
-                    state.stationFilter == StationFilter.OPEN_NOW -> "No stations are currently open right now. Try switching to 'All stations'."
-                    state.searchQuery.isNotEmpty() -> "No stations found matching \"${state.searchQuery}\"."
-                    else -> "We couldn't find any water stations matching your current search or location criteria."
-                }
-
-                val actionLabel = when {
-                    isNearestNoLocation -> "Set Location"
-                    state.searchQuery.isNotEmpty() -> "Clear Search"
-                    state.stationFilter != StationFilter.ALL -> "Show All Stations"
-                    else -> null
-                }
-
-                EmptyStateView(
-                    title = emptyTitle,
-                    description = emptyDescription,
-                    icon = Icons.Outlined.Storefront,
-                    actionLabel = actionLabel,
-                    onAction = {
-                        when {
-                            isNearestNoLocation -> onRequestLocationAccess()
-                            state.searchQuery.isNotEmpty() -> onSearchChange("")
-                            else -> onFilterChange(StationFilter.ALL)
-                        }
-                    }
-                )
-            }
-        } else {
-            items(displayedStations, key = { it.id }) { station ->
-                StationCard(
-                    station = station,
-                    origin = state.location,
-                    onClick = onStationClick
-                )
+                Icon(Icons.Outlined.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Try again", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -393,8 +415,8 @@ private fun ActiveLiveOrderBanner(
         initialValue = 0.40f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(750, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            animation = tween(750, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
         ),
         label = "liveDotAlpha"
     )
@@ -478,7 +500,8 @@ private fun ActiveLiveOrderBanner(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun HomeScreenPreview() {
     val sampleStation = PublicStation(
@@ -504,8 +527,6 @@ private fun HomeScreenPreview() {
     AquaHubCustomerTheme(dynamicColor = false) {
         HomeContent(
             state = sampleState,
-            onSearchChange = {},
-            onFilterChange = {},
             onRequestLocationAccess = {},
             onPickLocationClick = {},
             onStationClick = {},

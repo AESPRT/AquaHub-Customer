@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "test": "firebase emulators:exec --project aquahub-rules-test --only firestore 'node --test firestore.rules.test.mjs'"
+    "test": "firebase emulators:exec --project aquahub-rules-test --only firestore,storage 'node --test *.rules.test.mjs'"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

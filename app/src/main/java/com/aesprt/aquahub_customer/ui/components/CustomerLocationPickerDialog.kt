@@ -31,7 +31,6 @@ import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -208,7 +207,7 @@ fun CustomerLocationPickerDialog(
                             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                             trailingIcon = {
                                 if (state.locationPickerLoading) {
-                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    AquaLoadingIndicator(Modifier.size(22.dp), size = 22.dp, strokeWidth = 2.dp)
                                 } else {
                                     IconButton(
                                         onClick = {

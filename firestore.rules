@@ -45,18 +45,30 @@ service cloud.firestore {
       return /databases/$(database)/documents/businesses/$(businessId)/subscription/current;
     }
 
+    // Older subscription records used epoch milliseconds while the current
+    // backend writes Firestore Timestamps. Accept both representations so an
+    // active paid/trial plan cannot accidentally lock team order operations.
+    function futureSubscriptionTime(value) {
+      return (value is timestamp && value > request.time) ||
+        (value is number && value > request.time.seconds * 1000);
+    }
+
     function hasActiveSubscription(businessId) {
       return exists(subscriptionPath(businessId)) &&
         (
           (
             get(subscriptionPath(businessId)).data.status == 'TRIALING' &&
-            get(subscriptionPath(businessId)).data.trialEndsAt is timestamp &&
-            get(subscriptionPath(businessId)).data.trialEndsAt > request.time
+            futureSubscriptionTime(get(subscriptionPath(businessId)).data.trialEndsAt)
           ) ||
           (
-            get(subscriptionPath(businessId)).data.status in ['ACTIVE', 'ACTIVE_UNTIL_PERIOD_END'] &&
-            get(subscriptionPath(businessId)).data.currentPeriodEnd is timestamp &&
-            get(subscriptionPath(businessId)).data.currentPeriodEnd > request.time
+            (
+              get(subscriptionPath(businessId)).data.planCode == 'FREE' &&
+              get(subscriptionPath(businessId)).data.status == 'ACTIVE'
+            ) ||
+            (
+              get(subscriptionPath(businessId)).data.status in ['ACTIVE', 'ACTIVE_UNTIL_PERIOD_END'] &&
+              futureSubscriptionTime(get(subscriptionPath(businessId)).data.currentPeriodEnd)
+            )
           )
         );
     }
@@ -90,11 +102,120 @@ service cloud.firestore {
 
     function operatesStation(businessId, stationId) {
       return stationAccess(businessId, stationId) &&
+        memberRole(businessId) in ['OWNER', 'MANAGER', 'STAFF', 'RIDER'];
+    }
+
+    function canProcessWalkIn(businessId, stationId) {
+      return stationAccess(businessId, stationId) &&
         memberRole(businessId) in ['OWNER', 'MANAGER', 'STAFF'];
     }
 
     function belongsToStation(stationId) {
       return request.resource.data.stationId == stationId;
+    }
+
+    function validPromotionShape(businessId) {
+      return !request.resource.data.keys().hasAny(["promotionIsActive"]) ||
+        request.resource.data.promotionIsActive == false ||
+        (request.resource.data.promotionIsActive == true &&
+          get(subscriptionPath(businessId)).data.planCode in ["BUSINESS", "PRO"] &&
+          request.resource.data.promotionType in ["PERCENTAGE", "FIXED_PRICE", "QUANTITY_BREAK"] &&
+          request.resource.data.promotionLabel is string &&
+          request.resource.data.promotionLabel.size() >= 2 &&
+          request.resource.data.promotionLabel.size() <= 80 &&
+          request.resource.data.promotionMinimumQuantity is int &&
+          request.resource.data.promotionMinimumQuantity >= 1 &&
+          request.resource.data.promotionMinimumQuantity <= 99 &&
+          (request.resource.data.promotionEndsAt == null ||
+            request.resource.data.promotionEndsAt > request.resource.data.promotionStartsAt) &&
+          ((request.resource.data.promotionType == "FIXED_PRICE" &&
+              request.resource.data.promotionalPriceCentavos is int &&
+              request.resource.data.promotionalPriceCentavos > 0 &&
+              request.resource.data.promotionalPriceCentavos < request.resource.data.priceCentavos) ||
+            (request.resource.data.promotionType in ["PERCENTAGE", "QUANTITY_BREAK"] &&
+              request.resource.data.promotionPercentBps is int &&
+              request.resource.data.promotionPercentBps >= 100 &&
+              request.resource.data.promotionPercentBps <= 9000)));
+    }
+
+    function validProductShape(businessId, stationId, productId) {
+      return request.resource.data.id == productId &&
+        request.resource.data.stationId == stationId &&
+        (!request.resource.data.keys().hasAny(["priceCentavos"]) ||
+          (request.resource.data.priceCentavos is int && request.resource.data.priceCentavos >= 0)) &&
+        (!request.resource.data.keys().hasAny(["stockQuantity"]) ||
+          (request.resource.data.stockQuantity is int && request.resource.data.stockQuantity >= 0)) &&
+        (!request.resource.data.keys().hasAny(["isAvailable"]) || request.resource.data.isAvailable is bool) &&
+        (!request.resource.data.keys().hasAny(["isActive"]) || request.resource.data.isActive is bool) &&
+        validPromotionShape(businessId);
+    }
+
+    function hasExpenseAccess(businessId) {
+      return hasActiveSubscription(businessId) &&
+        get(subscriptionPath(businessId)).data.planCode in ['BUSINESS', 'PRO'];
+    }
+
+    function validExpenseShape(stationId, expenseId) {
+      return request.resource.data.id == expenseId &&
+        request.resource.data.stationId == stationId &&
+        request.resource.data.amountCentavos is int &&
+        request.resource.data.amountCentavos > 0 &&
+        request.resource.data.amountCentavos <= 10000000000 &&
+        request.resource.data.category in [
+          'ELECTRICITY', 'WATER', 'FUEL', 'SUPPLIES', 'SALARIES',
+          'MAINTENANCE', 'RENT', 'PERMITS', 'OTHER'
+        ] &&
+        request.resource.data.description is string &&
+        request.resource.data.description.size() >= 2 &&
+        request.resource.data.description.size() <= 120 &&
+        (!request.resource.data.keys().hasAny(['vendor']) || request.resource.data.vendor == null ||
+          (request.resource.data.vendor is string && request.resource.data.vendor.size() <= 100)) &&
+        (!request.resource.data.keys().hasAny(['referenceNumber']) || request.resource.data.referenceNumber == null ||
+          (request.resource.data.referenceNumber is string && request.resource.data.referenceNumber.size() <= 80)) &&
+        (!request.resource.data.keys().hasAny(['notes']) || request.resource.data.notes == null ||
+          (request.resource.data.notes is string && request.resource.data.notes.size() <= 500)) &&
+        request.resource.data.paymentMethod in ['CASH', 'GCASH', 'MAYA', 'BANK_TRANSFER', 'OTHER'] &&
+        request.resource.data.incurredAt is int &&
+        request.resource.data.createdAt is int &&
+        request.resource.data.clientUpdatedAt is int &&
+        request.resource.data.isActive is bool;
+    }
+
+    function validOrderIdentity(stationId, orderId) {
+      return request.resource.data.id == orderId &&
+        request.resource.data.stationId == stationId;
+    }
+
+    function validOrderUpdate(stationId, orderId) {
+      return validOrderIdentity(stationId, orderId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          "businessId", "stationId", "id", "customerUid", "customerId", "customerProfileId",
+          "items", "subtotalCentavos", "deliveryFeeCentavos", "discountCentavos", "totalCentavos",
+          "paymentMethod", "paymentStatus", "createdAt", "requestedAt"
+        ]);
+    }
+
+    function supportedOwnerPaymentMethod(value) {
+      return value in ['CASH', 'CASH_ON_DELIVERY', 'GCASH', 'MAYA'];
+    }
+
+    function validOrderPaymentUpdate(stationId, orderId) {
+      return validOrderIdentity(stationId, orderId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'paymentMethod', 'paymentStatus', 'clientUpdatedAt', 'updatedAt',
+          'version', 'lastClientOperationId'
+        ]) &&
+        supportedOwnerPaymentMethod(request.resource.data.paymentMethod) &&
+        request.resource.data.paymentStatus in ['PENDING', 'PAID', 'FAILED', 'REFUNDED'];
+    }
+
+    function validRiderOperationalUpdate(stationId, riderId) {
+      return request.resource.data.id == riderId &&
+        request.resource.data.stationId == stationId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "activeOrderCount", "isAvailable", "isOnline", "latitude", "longitude",
+          "clientUpdatedAt", "updatedAt", "version", "lastClientOperationId", "deletedAt"
+        ]);
     }
 
     function isActiveCustomer() {
@@ -104,44 +225,130 @@ service cloud.firestore {
         get(userPath(request.auth.uid)).data.isActive == true;
     }
 
+    function publicStationVisible(businessId, stationId) {
+      return isActiveCustomer() &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/publicStations/$(stationId)) &&
+        get(/databases/$(database)/documents/businesses/$(businessId)/publicStations/$(stationId)).data.isActive == true &&
+        get(/databases/$(database)/documents/businesses/$(businessId)/publicStations/$(stationId)).data.businessId == businessId;
+    }
+
     function validCustomerProfileCreate(uid) {
-      return request.resource.data.keys().hasAll(['uid', 'role', 'isActive']) &&
+      return request.resource.data.keys().hasAll(["uid", "role", "isActive"]) &&
         request.resource.data.uid == uid &&
-        request.resource.data.role == 'CUSTOMER' &&
-        request.resource.data.isActive == true;
+        request.resource.data.role == "CUSTOMER" &&
+        request.resource.data.isActive == true &&
+        !request.resource.data.keys().hasAny(["preferredBusinessId", "preferredStationId", "acquisitionSource", "acquiredAt"]) &&
+        validProfileShape() &&
+        validSetupComplete() &&
+        validEmailVerification();
+    }
+
+    function validProfileShape() {
+      return request.resource.data.keys().hasOnly([
+        "uid", "role", "isActive", "activeBusinessId",
+        "firstName", "lastName", "displayName", "email", "phone", "photoUrl",
+        "address", "latitude", "longitude", "placeId", "setupComplete", "emailVerified",
+        "preferredBusinessId", "preferredStationId", "acquisitionSource", "acquiredAt",
+        "createdAt", "updatedAt"
+      ]) &&
+        (!request.resource.data.keys().hasAny(["firstName"]) ||
+          (request.resource.data.firstName == null || request.resource.data.firstName is string && request.resource.data.firstName.size() <= 80)) &&
+        (!request.resource.data.keys().hasAny(["lastName"]) ||
+          (request.resource.data.lastName == null || request.resource.data.lastName is string && request.resource.data.lastName.size() <= 80)) &&
+        (!request.resource.data.keys().hasAny(["displayName"]) ||
+          (request.resource.data.displayName == null || request.resource.data.displayName is string && request.resource.data.displayName.size() <= 120)) &&
+        (!request.resource.data.keys().hasAny(["email"]) ||
+          (request.resource.data.email == null || request.resource.data.email is string && request.resource.data.email.size() <= 254)) &&
+        (!request.resource.data.keys().hasAny(["phone"]) ||
+          (request.resource.data.phone == null || request.resource.data.phone is string && request.resource.data.phone.size() <= 32)) &&
+        (!request.resource.data.keys().hasAny(["photoUrl"]) ||
+          (request.resource.data.photoUrl == null || request.resource.data.photoUrl is string && request.resource.data.photoUrl.size() <= 2048)) &&
+        (!request.resource.data.keys().hasAny(["address"]) ||
+          (request.resource.data.address == null || request.resource.data.address is string && request.resource.data.address.size() <= 500)) &&
+        (!request.resource.data.keys().hasAny(["placeId"]) ||
+          (request.resource.data.placeId == null || request.resource.data.placeId is string && request.resource.data.placeId.size() <= 256)) &&
+        (!request.resource.data.keys().hasAny(["latitude"]) ||
+          (request.resource.data.latitude == null || request.resource.data.latitude is number && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90)) &&
+        (!request.resource.data.keys().hasAny(["longitude"]) ||
+          (request.resource.data.longitude == null || request.resource.data.longitude is number && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180)) &&
+        (!request.resource.data.keys().hasAny(["preferredBusinessId"]) ||
+          (request.resource.data.preferredBusinessId == null || request.resource.data.preferredBusinessId is string && request.resource.data.preferredBusinessId.size() <= 160)) &&
+        (!request.resource.data.keys().hasAny(["preferredStationId"]) ||
+          (request.resource.data.preferredStationId == null || request.resource.data.preferredStationId is string && request.resource.data.preferredStationId.size() <= 160)) &&
+        (!request.resource.data.keys().hasAny(["acquisitionSource"]) ||
+          (request.resource.data.acquisitionSource is string && request.resource.data.acquisitionSource in ["STATION_QR", "STATION_LINK", "OWNER_REFERRAL", "ORGANIC_APP", "SEARCH", "UNKNOWN"])) &&
+        (!request.resource.data.keys().hasAny(["acquiredAt"]) ||
+          (request.resource.data.acquiredAt == null || request.resource.data.acquiredAt is number));
+    }
+
+    function validSetupComplete() {
+      return !request.resource.data.keys().hasAny(["setupComplete"]) ||
+        request.resource.data.setupComplete == false ||
+        (request.resource.data.keys().hasAll(["phone", "address", "latitude", "longitude"]) &&
+         request.resource.data.phone is string && request.resource.data.phone.size() > 0 &&
+         request.resource.data.address is string && request.resource.data.address.size() > 0 &&
+         request.resource.data.latitude is number && request.resource.data.longitude is number);
+    }
+
+    function validEmailVerification() {
+      return !request.resource.data.keys().hasAny(["emailVerified"]) ||
+        request.resource.data.emailVerified == request.auth.token.email_verified;
+    }
+
+    function validDeviceDocument() {
+      return request.resource.data.keys().hasOnly(["token", "platform", "updatedAt"]) &&
+        request.resource.data.token is string &&
+        request.resource.data.token.size() > 0 &&
+        request.resource.data.token.size() <= 4096 &&
+        request.resource.data.platform == "ANDROID" &&
+        (!request.resource.data.keys().hasAny(["updatedAt"]) ||
+          request.resource.data.updatedAt is timestamp || request.resource.data.updatedAt is number);
     }
 
     function validOwnerProfileCreate(uid) {
-      return request.resource.data.keys().hasAll(['uid', 'activeBusinessId', 'role', 'isActive']) &&
+      return request.resource.data.keys().hasAll(["uid", "activeBusinessId", "role", "isActive"]) &&
         request.resource.data.uid == uid &&
-        request.resource.data.role == 'OWNER' &&
+        request.resource.data.role == "OWNER" &&
         request.resource.data.isActive == true &&
         request.resource.data.activeBusinessId is string &&
-        ownsBusinessAs(request.resource.data.activeBusinessId, uid);
+        ownsBusinessAs(request.resource.data.activeBusinessId, uid) &&
+        validProfileShape();
     }
 
-    // Compatibility for owner app versions that created the business first but
-    // did not yet write role/isActive into users/{uid}. New code writes both.
     function validLegacyOwnerProfileCreate(uid) {
-      return request.resource.data.keys().hasAll(['uid', 'activeBusinessId']) &&
-        !request.resource.data.keys().hasAny(['role', 'isActive']) &&
+      return request.resource.data.keys().hasAll(["uid", "activeBusinessId"]) &&
+        !request.resource.data.keys().hasAny(["role", "isActive"]) &&
         request.resource.data.uid == uid &&
         request.resource.data.activeBusinessId is string &&
-        ownsBusinessAs(request.resource.data.activeBusinessId, uid);
+        ownsBusinessAs(request.resource.data.activeBusinessId, uid) &&
+        validProfileShape();
     }
 
     function validSelfProfileUpdate(uid) {
       return request.resource.data.uid == uid &&
+        validProfileShape() &&
+        validSetupComplete() &&
+        validEmailVerification() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'firstName', 'lastName', 'displayName', 'email', 'phone', 'photoUrl',
-          'activeBusinessId', 'createdAt', 'updatedAt'
+          "firstName", "lastName", "displayName", "email", "phone", "photoUrl",
+          "address", "latitude", "longitude", "placeId", "setupComplete", "emailVerified",
+          "activeBusinessId", "createdAt", "updatedAt"
         ]) &&
         (
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['activeBusinessId']) ||
-          (
-            request.resource.data.activeBusinessId is string &&
-            ownsBusinessAs(request.resource.data.activeBusinessId, uid)
-          )
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["activeBusinessId"]) ||
+          (request.resource.data.activeBusinessId is string && ownsBusinessAs(request.resource.data.activeBusinessId, uid))
+        ) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["setupComplete"]) ||
+          request.resource.data.setupComplete == false ||
+          (request.resource.data.keys().hasAll(["phone", "address", "latitude", "longitude"]) &&
+           request.resource.data.phone is string && request.resource.data.address is string &&
+           request.resource.data.address.size() > 0 && request.resource.data.latitude is number &&
+           request.resource.data.longitude is number)
+        ) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["emailVerified"]) ||
+          request.resource.data.emailVerified == request.auth.token.email_verified
         );
     }
 
@@ -156,7 +363,9 @@ service cloud.firestore {
       allow delete: if false;
 
       match /devices/{deviceId} {
-        allow read, create, update, delete: if self(uid);
+        allow read: if self(uid);
+        allow create, update: if self(uid) && validDeviceDocument();
+        allow delete: if self(uid);
       }
 
       match /orders/{orderId} {
@@ -165,10 +374,10 @@ service cloud.firestore {
       }
     }
 
-    // Authenticated, active customers discover station documents through a
-    // collection-group query. Private nested resources remain protected below.
-    match /{path=**}/stations/{stationId} {
+    // Customers can query only the server-managed public station projection.
+    match /{path=**}/publicStations/{stationId} {
       allow read: if isActiveCustomer();
+      allow write: if false;
     }
 
     match /businesses/{businessId} {
@@ -185,17 +394,23 @@ service cloud.firestore {
       match /members/{uid} {
         // The owner must be able to check their own missing membership after
         // creating the business; otherwise first-registration deadlocks.
-        allow read: if isMember(businessId) ||
-          (self(uid) && ownsBusiness(businessId));
+        allow read: if managesBusiness(businessId) ||
+          (self(uid) && (isMember(businessId) || ownsBusiness(businessId)));
 
         allow create: if (
           managesBusiness(businessId) &&
+          request.resource.data.keys().hasOnly(["uid", "role", "isActive", "stationIds", "createdAt", "updatedAt"]) &&
+          request.resource.data.isActive is bool &&
+          request.resource.data.stationIds is list &&
           request.resource.data.uid == uid &&
-          request.resource.data.role in ['MANAGER', 'STAFF'] &&
+          request.resource.data.role in ['MANAGER', 'STAFF', 'RIDER'] &&
           request.resource.data.isActive is bool &&
           request.resource.data.stationIds is list
         ) || (
           self(uid) &&
+          request.resource.data.keys().hasOnly(["uid", "role", "isActive", "stationIds", "createdAt", "updatedAt"]) &&
+          request.resource.data.isActive is bool &&
+          request.resource.data.stationIds is list &&
           ownsBusiness(businessId) &&
           request.resource.data.uid == uid &&
           request.resource.data.role == 'OWNER' &&
@@ -206,10 +421,26 @@ service cloud.firestore {
         // Managers may maintain non-owner staff, but cannot create/promote an
         // owner or alter the owner's membership document.
         allow update: if managesBusiness(businessId) &&
-          resource.data.role != 'OWNER' &&
-          request.resource.data.role in ['MANAGER', 'STAFF'] &&
+          request.resource.data.keys().hasOnly(["uid", "role", "isActive", "stationIds", "createdAt", "updatedAt"]) &&
+          request.resource.data.isActive is bool &&
+          request.resource.data.stationIds is list &&
+          resource.data.role != "OWNER" &&
+          request.resource.data.role in ["MANAGER", "STAFF", "RIDER"] &&
           request.resource.data.uid == uid;
         allow delete: if false;
+      }
+
+      match /publicStations/{stationId} {
+        // Server-managed projection containing only customer-safe fields.
+        allow read: if isActiveCustomer();
+        allow write: if false;
+
+        match /products/{id} {
+          // Product projections intentionally omit stock and operational
+          // fields from the owner station catalog.
+          allow read: if publicStationVisible(businessId, stationId);
+          allow write: if false;
+        }
       }
 
       match /stations/{stationId} {
@@ -220,65 +451,80 @@ service cloud.firestore {
         allow delete: if false;
 
         match /customers/{id} {
-          allow read: if operatesStation(businessId, stationId);
-          allow create, update: if operatesStation(businessId, stationId) &&
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create, update: if canProcessWalkIn(businessId, stationId) &&
             belongsToStation(stationId);
           allow delete: if false;
         }
 
         match /customerAddresses/{id} {
-          allow read: if operatesStation(businessId, stationId);
-          allow create, update: if operatesStation(businessId, stationId) &&
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create, update: if canProcessWalkIn(businessId, stationId) &&
             belongsToStation(stationId);
           allow delete: if false;
         }
 
         match /products/{id} {
-          allow read: if operatesStation(businessId, stationId) || isActiveCustomer();
-          allow create, update: if operatesStation(businessId, stationId) &&
-            belongsToStation(stationId);
+          // Customers may read product data only for a station that the
+          // server has published as customer-visible.
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create, update: if canProcessWalkIn(businessId, stationId) &&
+            validProductShape(businessId, stationId, id);
           allow delete: if false;
         }
 
         match /riders/{id} {
           allow read: if operatesStation(businessId, stationId);
-          allow create, update: if operatesStation(businessId, stationId) &&
+          allow create: if managesBusiness(businessId) &&
             belongsToStation(stationId);
+          allow update: if (managesBusiness(businessId) && belongsToStation(stationId)) ||
+            (operatesStation(businessId, stationId) && validRiderOperationalUpdate(stationId, id));
           allow delete: if false;
         }
 
         match /orders/{id} {
           allow read: if operatesStation(businessId, stationId) ||
             (signedIn() && resource.data.customerUid == request.auth.uid);
-          allow create, update: if operatesStation(businessId, stationId) &&
-            belongsToStation(stationId);
+          allow create: if operatesStation(businessId, stationId) &&
+            validOrderIdentity(stationId, id);
+          allow update: if (operatesStation(businessId, stationId) &&
+            validOrderUpdate(stationId, id)) ||
+            (managesBusiness(businessId) && validOrderPaymentUpdate(stationId, id));
           allow delete: if false;
         }
 
         match /containerInventory/{id} {
-          allow read: if operatesStation(businessId, stationId);
-          allow create, update: if operatesStation(businessId, stationId) &&
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create, update: if canProcessWalkIn(businessId, stationId) &&
             belongsToStation(stationId);
           allow delete: if false;
         }
 
         match /containerMovements/{id} {
-          allow read: if operatesStation(businessId, stationId);
-          allow create: if operatesStation(businessId, stationId) &&
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create: if canProcessWalkIn(businessId, stationId) &&
             belongsToStation(stationId);
           allow update, delete: if false;
         }
 
         match /payments/{id} {
-          allow read: if operatesStation(businessId, stationId);
-          allow create: if operatesStation(businessId, stationId) &&
+          allow read: if managesBusiness(businessId);
+          allow create: if managesBusiness(businessId) &&
             belongsToStation(stationId) &&
-            request.resource.data.paymentMethod in ['CASH', 'CASH_ON_DELIVERY'];
+            supportedOwnerPaymentMethod(request.resource.data.paymentMethod);
           allow update: if managesBusiness(businessId) &&
             belongsToStation(stationId) &&
             request.resource.data.stationId == resource.data.stationId &&
             request.resource.data.amountCentavos == resource.data.amountCentavos &&
             request.resource.data.paymentMethod == resource.data.paymentMethod;
+          allow delete: if false;
+        }
+
+        match /expenses/{id} {
+          allow read: if managesBusiness(businessId);
+          allow create, update: if managesBusiness(businessId) &&
+            hasExpenseAccess(businessId) &&
+            validExpenseShape(stationId, id);
           allow delete: if false;
         }
       }
@@ -309,4 +555,3 @@ service cloud.firestore {
     }
   }
 }
-

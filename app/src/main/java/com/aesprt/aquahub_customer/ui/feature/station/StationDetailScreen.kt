@@ -1,5 +1,6 @@
 package com.aesprt.aquahub_customer.ui.feature.station
 
+import android.content.res.Configuration
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -13,11 +14,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Star
@@ -32,12 +31,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aesprt.aquahub_customer.domain.*
 import com.aesprt.aquahub_customer.ui.CustomerUiState
 import com.aesprt.aquahub_customer.ui.CustomerViewModel
 import com.aesprt.aquahub_customer.ui.components.*
 import com.aesprt.aquahub_customer.ui.theme.*
+import java.time.LocalTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -191,7 +190,7 @@ fun StationDetailContent(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                StationStatusChip(isOpen = station.isAcceptingOrders)
+                                StationStatusChip(isOpen = station.isOpenAt(LocalTime.now()))
 
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -418,7 +417,8 @@ fun StationDetailContent(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light Mode", showBackground = true)
+@Preview(name = "Dark Mode", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun StationDetailScreenPreview() {
     val sampleStation = PublicStation(
@@ -427,12 +427,12 @@ private fun StationDetailScreenPreview() {
         name = "aquaman Refilling Station",
         phone = "09123456789",
         address = "Bansalangin, Quezon City",
-        location = com.aesprt.aquahub_customer.domain.GeoPoint(14.66, 121.02),
+        location = GeoPoint(14.66, 121.02),
         isAcceptingOrders = true,
         openingTime = "07:00",
         closingTime = "20:00",
         deliveryRadiusKm = 5.0,
-        deliveryFee = com.aesprt.aquahub_customer.domain.Money.fromPesos(25),
+        deliveryFee = Money.fromPesos(25),
         estimatedPreparationMinutes = 30
     )
     val sampleProducts = listOf(
@@ -440,7 +440,7 @@ private fun StationDetailScreenPreview() {
             id = "p-1",
             name = "5 Gallon Round (Refill)",
             type = ProductType.REFILL,
-            price = com.aesprt.aquahub_customer.domain.Money.fromPesos(50),
+            price = Money.fromPesos(50),
             description = "Clean, purified drinking water refill",
             sizeLabel = "20 Litters",
             imagePath = null,
@@ -450,7 +450,7 @@ private fun StationDetailScreenPreview() {
             id = "p-2",
             name = "5 Gallon Slim with Faucet",
             type = ProductType.NEW_CONTAINER,
-            price = com.aesprt.aquahub_customer.domain.Money.fromPesos(220),
+            price = Money.fromPesos(220),
             description = "Brand new food-grade container with built-in tap",
             sizeLabel = "20 Litters",
             imagePath = null,

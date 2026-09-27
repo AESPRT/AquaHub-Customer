@@ -1,12 +1,17 @@
 package com.aesprt.aquahub_customer.ui
 
 import com.aesprt.aquahub_customer.domain.DeliveryAddress
+import com.aesprt.aquahub_customer.domain.CustomerAcquisitionSource
+import com.aesprt.aquahub_customer.domain.CustomerProfile
 import com.aesprt.aquahub_customer.domain.DeliveryMode
 import com.aesprt.aquahub_customer.domain.GeoPoint
 import com.aesprt.aquahub_customer.domain.Money
+import com.aesprt.aquahub_customer.domain.PaymentMethod
 import com.aesprt.aquahub_customer.domain.PublicStation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalTime
 
@@ -56,35 +61,6 @@ class CustomerUiStateTest {
     }
 
     @Test
-    fun `nearest filter only includes stations within 1km from selected customer location`() {
-        val state = CustomerUiState(
-            location = GeoPoint(8.45, 124.63),
-            stationFilter = StationFilter.NEAREST,
-            stations = listOf(
-                station("Far", GeoPoint(8.60, 124.80)), // ~25 km away
-                station("Near", GeoPoint(8.451, 124.631)), // ~0.15 km away
-            ),
-        )
-
-        assertEquals(listOf("Near"), state.displayedStations(LocalTime.NOON).map { it.name })
-    }
-
-    @Test
-    fun `nearest filter sorts multiple stations within 1km closest first`() {
-        val state = CustomerUiState(
-            location = GeoPoint(8.45, 124.63),
-            stationFilter = StationFilter.NEAREST,
-            stations = listOf(
-                station("Far", GeoPoint(8.60, 124.80)), // ~25 km away (excluded)
-                station("Mid", GeoPoint(8.455, 124.635)), // ~0.78 km away
-                station("Closest", GeoPoint(8.451, 124.631)), // ~0.15 km away
-            ),
-        )
-
-        assertEquals(listOf("Closest", "Mid"), state.displayedStations(LocalTime.NOON).map { it.name })
-    }
-
-    @Test
     fun `nearest filter returns empty list when customer location is null`() {
         val state = CustomerUiState(
             location = null,
@@ -98,17 +74,91 @@ class CustomerUiStateTest {
     }
 
     @Test
-    fun `open now filter excludes closed and paused stations`() {
+    fun `linked customer sees only exact scanned station`() {
         val state = CustomerUiState(
-            stationFilter = StationFilter.OPEN_NOW,
+            profile = CustomerProfile(
+                uid = "customer",
+                displayName = "Customer",
+                email = null,
+                phone = "",
+                preferredBusinessId = "business-a",
+                preferredStationId = "branch-a",
+                acquisitionSource = CustomerAcquisitionSource.STATION_QR,
+            ),
             stations = listOf(
-                station("Open", GeoPoint(8.45, 124.63), opening = "08:00", closing = "18:00"),
-                station("Closed", GeoPoint(8.46, 124.64), opening = "18:00", closing = "23:00"),
-                station("Paused", GeoPoint(8.47, 124.65), accepting = false),
+                station("A", GeoPoint(8.45, 124.63)).copy(id = "branch-a", businessId = "business-a"),
+                station("B", GeoPoint(8.46, 124.64)).copy(id = "branch-b", businessId = "business-a"),
+                station("Competitor", GeoPoint(8.451, 124.631)).copy(id = "competitor", businessId = "business-b"),
             ),
         )
 
-        assertEquals(listOf("Open"), state.displayedStations(LocalTime.of(10, 0)).map { it.name })
+        assertEquals(listOf("A"), state.displayedStations(LocalTime.NOON).map { it.name })
+        assertEquals(
+            listOf("A"),
+            state.copy(browsingDiscovery = true).displayedStations(LocalTime.NOON).map { it.name },
+        )
+    }
+
+    @Test
+    fun `unlinked customer cannot browse any station`() {
+        val state = CustomerUiState(
+            profile = CustomerProfile(
+                uid = "customer",
+                displayName = "Customer",
+                email = null,
+                phone = "",
+                acquisitionSource = CustomerAcquisitionSource.ORGANIC_APP,
+            ),
+            stations = listOf(
+                station("A", GeoPoint(8.45, 124.63)).copy(businessId = "business-a"),
+                station("Competitor", GeoPoint(8.451, 124.631)).copy(businessId = "business-b"),
+            ),
+        )
+
+        assertEquals(emptyList<PublicStation>(), state.displayedStations(LocalTime.NOON))
+    }
+
+    @Test
+    fun `checkout requires published station rules and explicit acceptance`() {
+        val stationWithRules = station("Station", GeoPoint(8.45, 124.63)).copy(
+            businessRulesText = "Return borrowed containers in good condition.",
+            businessRulesVersion = 3L,
+        )
+
+        assertFalse(CustomerUiState(selectedStation = stationWithRules).canPlaceOrder)
+        assertTrue(
+            CustomerUiState(
+                selectedStation = stationWithRules,
+                businessRulesRead = true,
+                businessRulesAccepted = true,
+            ).canPlaceOrder,
+        )
+        assertFalse(
+            CustomerUiState(
+                selectedStation = stationWithRules.copy(businessRulesText = null),
+                businessRulesRead = true,
+                businessRulesAccepted = true,
+            ).canPlaceOrder,
+        )
+    }
+
+    @Test
+    fun `checkout exposes only station enabled methods for fulfilment mode`() {
+        val configured = station("Station", GeoPoint(8.45, 124.63)).copy(
+            cashPaymentEnabled = false,
+            codPaymentEnabled = true,
+            gcashPaymentEnabled = true,
+            mayaPaymentEnabled = false,
+        )
+
+        assertEquals(
+            listOf(PaymentMethod.CASH_ON_DELIVERY, PaymentMethod.GCASH),
+            CustomerUiState(selectedStation = configured, deliveryMode = DeliveryMode.DELIVERY).availablePaymentMethods,
+        )
+        assertEquals(
+            listOf(PaymentMethod.GCASH),
+            CustomerUiState(selectedStation = configured, deliveryMode = DeliveryMode.PICKUP).availablePaymentMethods,
+        )
     }
 
     private fun station(
@@ -117,6 +167,7 @@ class CustomerUiStateTest {
         opening: String? = null,
         closing: String? = null,
         accepting: Boolean = true,
+        open: Boolean = true,
     ) = PublicStation(
         id = name,
         businessId = "business",
@@ -130,5 +181,6 @@ class CustomerUiStateTest {
         deliveryRadiusKm = 5.0,
         deliveryFee = Money.Zero,
         estimatedPreparationMinutes = 15,
+        isOpen = open,
     )
 }

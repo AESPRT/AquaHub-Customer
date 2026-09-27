@@ -10,24 +10,30 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import com.aesprt.aquahub_customer.data.preferences.ThemeMode
 
 private val DarkColorScheme = darkColorScheme(
-    primary = AquaPrimaryLight,
-    onPrimary = NavyDark,
+    primary = AquaPrimaryDark,
+    onPrimary = White,
     primaryContainer = NavyDeep,
     onPrimaryContainer = AquaCyan,
     secondary = AquaCyan,
     onSecondary = NavyDark,
     secondaryContainer = Color(0xFF003F47),
-    onSecondaryContainer = AquaCyan,
+    onSecondaryContainer = AquaCyanSoft,
     tertiary = AquaCyan,
     onTertiary = NavyDark,
+    tertiaryContainer = Color(0xFF003F47),
+    onTertiaryContainer = AquaCyanSoft,
     background = BackgroundDark,
     surface = SurfaceDark,
     onBackground = White,
     onSurface = White,
     surfaceVariant = SurfaceContainerDark,
     onSurfaceVariant = Slate300,
+    surfaceContainer = SurfaceDark,
+    surfaceContainerHigh = SurfaceContainerDark,
+    surfaceContainerLowest = NavyDark,
     outline = Slate600,
     outlineVariant = Slate700,
     error = ErrorRed,
@@ -58,23 +64,35 @@ private val LightColorScheme = lightColorScheme(
     onBackground = Slate900,
     onSurface = Slate900,
     onSurfaceVariant = Slate600,
-    surfaceVariant = Slate100,
+    surfaceVariant = Slate50,
+    surfaceContainer = White,
+    surfaceContainerHigh = Color(0xFFF0F6FE),
+    surfaceContainerLowest = White,
     outline = Slate300,
     outlineVariant = Slate200,
+    inverseSurface = Slate800,
+    inverseOnSurface = White,
+    inversePrimary = AquaPrimaryDark,
 )
 
 @Composable
 fun AquaHubCustomerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val resolvedDarkTheme = when (themeMode) {
+        ThemeMode.SYSTEM -> darkTheme
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (resolvedDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
+        resolvedDarkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
     MaterialTheme(

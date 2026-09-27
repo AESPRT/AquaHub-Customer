@@ -297,6 +297,18 @@ fun OrderTrackingContent(
                 }
             }
 
+            item {
+                AquaHubGlassCard(shape = AquaHubShapes.cardSecondary) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Outlined.Payments, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Column {
+                            Text("Payment method", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(order.paymentMethod.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
             // Order Items & Financial Summary
             item {
                 OrderSummaryCard(
@@ -408,4 +420,3 @@ private fun OrderTrackingScreenPreview() {
         )
     }
 }
-

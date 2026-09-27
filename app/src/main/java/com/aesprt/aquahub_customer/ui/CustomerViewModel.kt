@@ -1,10 +1,10 @@
 package com.aesprt.aquahub_customer.ui
 
-import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aesprt.aquahub_customer.data.local.dao.SavedAddressDao
 import com.aesprt.aquahub_customer.data.local.entity.toEntity
+import com.aesprt.aquahub_customer.data.preferences.ThemePreferences
 import com.aesprt.aquahub_customer.domain.AppResult
 import com.aesprt.aquahub_customer.domain.AuthRepository
 import com.aesprt.aquahub_customer.domain.CartLine
@@ -12,6 +12,7 @@ import com.aesprt.aquahub_customer.domain.CatalogRepository
 import com.aesprt.aquahub_customer.domain.CreateOrderRequest
 import com.aesprt.aquahub_customer.domain.CustomerOrder
 import com.aesprt.aquahub_customer.domain.CustomerProfile
+import com.aesprt.aquahub_customer.domain.CustomerAcquisitionSource
 import com.aesprt.aquahub_customer.domain.DeliveryAddress
 import com.aesprt.aquahub_customer.domain.DeliveryMode
 import com.aesprt.aquahub_customer.domain.GeoPoint
@@ -22,6 +23,8 @@ import com.aesprt.aquahub_customer.domain.OrderRepository
 import com.aesprt.aquahub_customer.domain.PaymentMethod
 import com.aesprt.aquahub_customer.domain.PublicProduct
 import com.aesprt.aquahub_customer.domain.PublicStation
+import com.aesprt.aquahub_customer.domain.PendingStationLink
+import com.aesprt.aquahub_customer.domain.PreferredStation
 import com.aesprt.aquahub_customer.domain.ResolvedLocation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,8 +34,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalTime
-
-const val MAX_NEAREST_STATION_DISTANCE_KM = 1.0
 
 enum class StationFilter(val label: String) {
     ALL("All stations"),
@@ -49,16 +50,23 @@ data class CustomerUiState(
     val stationsFromCache: Boolean = false,
     val stationsError: String? = null,
     val selectedStation: PublicStation? = null,
+    val pendingStationSelection: PublicStation? = null,
+    val browsingDiscovery: Boolean = false,
+    val pendingStationLink: PendingStationLink? = null,
+    val resolvingStationLink: Boolean = false,
     val products: List<PublicProduct> = emptyList(),
     val productsFromCache: Boolean = false,
     val cart: List<CartLine> = emptyList(),
     val orders: List<CustomerOrder> = emptyList(),
+    val ordersFromCache: Boolean = false,
+    val ordersError: String? = null,
     val location: GeoPoint? = null,
     val locationLabel: String = "Set your location",
     val locationLoading: Boolean = false,
     val searchQuery: String = "",
     val stationFilter: StationFilter = StationFilter.ALL,
     val deliveryMode: DeliveryMode = DeliveryMode.DELIVERY,
+    val selectedPaymentMethod: PaymentMethod? = PaymentMethod.CASH_ON_DELIVERY,
     val address: String = "",
     val addressPlaceId: String? = null,
     val savedAddresses: List<DeliveryAddress> = emptyList(),
@@ -72,17 +80,31 @@ data class CustomerUiState(
     val businessRulesRead: Boolean = false,
     val businessRulesAccepted: Boolean = false,
     val submitting: Boolean = false,
-    val message: String? = null,
-    val maxNearestDistanceKm: Double = MAX_NEAREST_STATION_DISTANCE_KM,
+        val message: String? = null,
+    val authLoading: Boolean = false,
+    val authError: String? = null,
+    val deletingAccount: Boolean = false,
 ) {
     val cartCount: Int get() = cart.sumOf { it.quantity }
     val subtotal: Money get() = cart.fold(Money.Zero) { total, item -> total + item.subtotal }
+    val regularSubtotal: Money get() = cart.fold(Money.Zero) { total, item -> total + (item.product.price * item.quantity) }
+    val promotionSavings: Money get() = Money((regularSubtotal.centavos - subtotal.centavos).coerceAtLeast(0L))
     val deliveryFee: Money get() = if (deliveryMode == DeliveryMode.DELIVERY && cart.isNotEmpty())
         selectedStation?.deliveryFee ?: Money.Zero else Money.Zero
     val total: Money get() = subtotal + deliveryFee
 
+    val availablePaymentMethods: List<PaymentMethod> get() = buildList {
+        val station = selectedStation ?: return@buildList
+        if (deliveryMode == DeliveryMode.DELIVERY && station.codPaymentEnabled) add(PaymentMethod.CASH_ON_DELIVERY)
+        if (deliveryMode == DeliveryMode.PICKUP && station.cashPaymentEnabled) add(PaymentMethod.CASH)
+        if (station.gcashPaymentEnabled) add(PaymentMethod.GCASH)
+        if (station.mayaPaymentEnabled) add(PaymentMethod.MAYA)
+    }
+
     val canPlaceOrder: Boolean
-        get() = selectedStation?.businessRulesText?.isNotBlank() == true && businessRulesAccepted
+        get() = selectedStation?.businessRulesText?.isNotBlank() == true &&
+            businessRulesAccepted &&
+            selectedPaymentMethod in availablePaymentMethods
 
     val distanceToSelectedStationKm: Double? get() = selectedStation?.distanceKmFrom(location)
 
@@ -104,9 +126,24 @@ data class CustomerUiState(
 
     val filteredStations: List<PublicStation> get() {
         val query = searchQuery.trim()
+        val preferredBusinessId = profile?.preferredBusinessId
+        val preferredStationId = profile?.preferredStationId
         return stations
+            .filter {
+                !preferredBusinessId.isNullOrBlank() &&
+                    !preferredStationId.isNullOrBlank() &&
+                    it.businessId == preferredBusinessId &&
+                    it.id == preferredStationId
+            }
             .filter { query.isBlank() || it.name.contains(query, true) || it.address.contains(query, true) }
     }
+
+    val preferredStation: PublicStation? get() = stations.singleOrNull()
+
+    val hasLinkedStation: Boolean get() =
+        !profile?.preferredBusinessId.isNullOrBlank() && !profile.preferredStationId.isNullOrBlank()
+
+    val isStationOwnedCustomer: Boolean get() = hasLinkedStation
 
     fun displayedStations(now: LocalTime): List<PublicStation> = when (stationFilter) {
         StationFilter.ALL -> filteredStations.sortedWith(
@@ -119,14 +156,16 @@ data class CustomerUiState(
             val userLocation = location
             if (userLocation != null) {
                 filteredStations
-                    .filter { station ->
-                        val dist = station.distanceKmFrom(userLocation)
-                        dist != null && dist <= maxNearestDistanceKm
+                    .mapNotNull { station ->
+                        station.distanceKmFrom(userLocation)?.let { distance -> distance to station }
                     }
-                    .sortedWith(
-                        compareBy<PublicStation> { it.distanceKmFrom(userLocation) ?: Double.MAX_VALUE }
-                            .thenBy { it.name.lowercase() }
+                    .minWithOrNull(
+                        compareBy<Pair<Double, PublicStation>> { it.first }
+                            .thenBy { it.second.name.lowercase() },
                     )
+                    ?.second
+                    ?.let(::listOf)
+                    .orEmpty()
             } else {
                 emptyList()
             }
@@ -140,43 +179,110 @@ class CustomerViewModel(
     private val locationRepository: LocationRepository,
     private val orderRepository: OrderRepository,
     private val savedAddressDao: SavedAddressDao? = null,
+    private val preferences: ThemePreferences? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(CustomerUiState(firebaseConfigured = authRepository.isFirebaseConfigured))
     val state: StateFlow<CustomerUiState> = _state.asStateFlow()
     private var productJob: Job? = null
     private var orderJob: Job? = null
+    private var stationJob: Job? = null
     private var locationSearchJob: Job? = null
+    private var addressJob: Job? = null
+    private var pendingLinkJob: Job? = null
 
     init {
-        if (savedAddressDao != null) {
-            viewModelScope.launch {
-                savedAddressDao.getAll().collect { entities ->
-                    val domainList = entities.map { it.toDomain() }
-                    _state.update { current ->
-                        current.copy(savedAddresses = domainList).withSelectedSavedAddressIfBlank()
-                    }
+        viewModelScope.launch {
+            preferences?.pendingStationLink?.collect { persisted ->
+                if (persisted != null && _state.value.pendingStationLink == null) {
+                    _state.update { it.copy(pendingStationLink = persisted, browsingDiscovery = false) }
+                    if (_state.value.profile != null) resolvePendingStationLink()
                 }
             }
         }
         viewModelScope.launch {
             authRepository.profile.collect { profile ->
-                _state.update { it.copy(profile = profile, sessionReady = true) }
+                val previousUid = _state.value.profile?.uid
+                val accountChanged = previousUid != null && previousUid != profile?.uid
+                _state.update {
+                    it.copy(
+                        profile = profile,
+                        sessionReady = true,
+                        cart = if (accountChanged) emptyList() else it.cart,
+                        orders = if (accountChanged) emptyList() else it.orders,
+                        savedAddresses = if (accountChanged) emptyList() else it.savedAddresses,
+                        ordersFromCache = if (accountChanged) false else it.ordersFromCache,
+                        ordersError = if (accountChanged) null else it.ordersError,
+                        pendingStationSelection = null,
+                    )
+                }
+                addressJob?.cancel()
                 orderJob?.cancel()
+                stationJob?.cancel()
                 if (profile != null) {
-                    orderJob = launch {
-                        orderRepository.observeOrders().collect { orders -> _state.update { it.copy(orders = orders) } }
+                    addressJob = launch {
+                        savedAddressDao?.getAll(profile.uid)?.collect { entities ->
+                            _state.update { current -> current.copy(savedAddresses = entities.map { it.toDomain() }).withSelectedSavedAddressIfBlank() }
+                        }
                     }
+                    orderJob = observeOrders(profile.uid)
+                    stationJob = observeLinkedStation(profile)
+                    if (_state.value.pendingStationLink != null) resolvePendingStationLink()
                 } else {
-                    _state.update { it.copy(orders = emptyList(), cart = emptyList()) }
+                    productJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            orders = emptyList(),
+                            ordersFromCache = false,
+                            ordersError = null,
+                            cart = emptyList(),
+                            savedAddresses = emptyList(),
+                            stations = emptyList(),
+                            stationsFromCache = false,
+                            stationsError = null,
+                            selectedStation = null,
+                            products = emptyList(),
+                            productsFromCache = false,
+                            businessRulesRead = false,
+                            businessRulesAccepted = false,
+                            pendingStationSelection = null,
+                        )
+                    }
                 }
             }
         }
-        viewModelScope.launch {
-            catalogRepository.observeStations().collect { snapshot ->
+    }
+
+    private fun observeLinkedStation(profile: CustomerProfile): Job = viewModelScope.launch {
+        val businessId = profile.preferredBusinessId
+        val stationId = profile.preferredStationId
+        if (businessId.isNullOrBlank() || stationId.isNullOrBlank()) {
+            _state.update {
+                it.copy(
+                    stations = emptyList(),
+                    selectedStation = null,
+                    products = emptyList(),
+                    cart = emptyList(),
+                    stationsError = null,
+                )
+            }
+            return@launch
+        }
+        catalogRepository.observeStation(businessId, stationId).collect { snapshot ->
+            if (_state.value.profile?.uid == profile.uid) {
                 _state.update { current ->
-                    val refreshedSelectedStation = current.selectedStation?.let { selected ->
-                        snapshot.items.firstOrNull { it.id == selected.id } ?: selected
+                    val refreshedSelectedStation = snapshot.items.singleOrNull()
+                    // A direct document listener can emit an empty local-cache snapshot
+                    // immediately after a QR link is saved. Keep the station we just
+                    // resolved until Firestore has delivered an authoritative server result.
+                    if (refreshedSelectedStation == null && snapshot.isFromCache && current.selectedStation != null) {
+                        return@update current.copy(
+                            stationsFromCache = true,
+                            stationsError = snapshot.errorMessage,
+                        )
                     }
+                    val selectedStationRemoved = current.selectedStation != null &&
+                        refreshedSelectedStation == null &&
+                        snapshot.errorMessage == null
                     val rulesChanged = current.selectedStation?.businessRulesVersion !=
                         refreshedSelectedStation?.businessRulesVersion
                     current.copy(
@@ -184,25 +290,122 @@ class CustomerViewModel(
                         stationsFromCache = snapshot.isFromCache,
                         stationsError = snapshot.errorMessage,
                         selectedStation = refreshedSelectedStation,
+                        products = if (selectedStationRemoved) emptyList() else current.products,
+                        cart = if (selectedStationRemoved) emptyList() else current.cart,
+                        message = if (selectedStationRemoved) {
+                            "${current.selectedStation.name} is no longer available. Your cart was cleared."
+                        } else current.message,
                         businessRulesRead = if (rulesChanged) false else current.businessRulesRead,
                         businessRulesAccepted = if (rulesChanged) false else current.businessRulesAccepted,
-                    )
+                    ).withValidPaymentMethod()
+                }
+                snapshot.items.singleOrNull()?.let { station ->
+                    val selected = _state.value.selectedStation
+                    if (selected == null || selected.id != station.id || selected.businessId != station.businessId) {
+                        selectStation(station, persistPreference = false)
+                    } else if (productJob == null) {
+                        observeProductsFor(station)
+                    }
                 }
             }
         }
     }
 
-    fun beginGoogleSignIn(onReady: (Intent) -> Unit) = viewModelScope.launch {
-        when (val result = authRepository.freshGoogleSignInIntent()) {
-            is AppResult.Success -> onReady(result.value)
+    private fun restartLinkedStationObservation(profile: CustomerProfile) {
+        stationJob?.cancel()
+        stationJob = observeLinkedStation(profile)
+    }
+
+    fun retryLinkedStation() {
+        val profile = _state.value.profile ?: return
+        _state.update { it.copy(stationsError = null) }
+        restartLinkedStationObservation(profile)
+    }
+
+    private fun observeOrders(uid: String): Job = viewModelScope.launch {
+        orderRepository.observeOrders().collect { snapshot ->
+            if (_state.value.profile?.uid == uid) {
+                _state.update { it.copy(orders = snapshot.items, ordersFromCache = snapshot.isFromCache, ordersError = snapshot.errorMessage) }
+            }
+        }
+    }
+
+    fun retryOrders() {
+        val uid = _state.value.profile?.uid ?: return
+        orderJob?.cancel()
+        _state.update { it.copy(ordersError = null) }
+        orderJob = observeOrders(uid)
+    }
+
+    fun signInWithEmail(email: String, password: String) = viewModelScope.launch {
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.signInEmail(email, password)) {
+            is AppResult.Success -> _state.update { it.copy(authLoading = false, profile = result.value) }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun registerWithEmail(name: String, email: String, password: String, confirmPassword: String) = viewModelScope.launch {
+        if (password != confirmPassword) { _state.update { it.copy(authError = "Passwords do not match.") }; return@launch }
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.registerEmail(name, email, password)) {
+            is AppResult.Success -> _state.update { it.copy(authLoading = false, profile = result.value, message = "Verification email sent.") }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun resetPassword(email: String) = viewModelScope.launch {
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.sendPasswordReset(email)) {
+            is AppResult.Success -> _state.update { it.copy(authLoading = false, message = "Password reset email sent.") }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun resendEmailVerification() = viewModelScope.launch {
+        when (val result = authRepository.resendEmailVerification()) {
+            is AppResult.Success -> showMessage("Verification email sent again.")
             is AppResult.Failure -> showMessage(result.message)
         }
     }
 
-    fun completeGoogleSignIn(data: Intent?) = viewModelScope.launch {
-        when (val result = authRepository.completeGoogleSignIn(data)) {
+    fun refreshEmailVerification() = viewModelScope.launch {
+        when (val result = authRepository.refreshProfile()) {
             is AppResult.Success -> _state.update { it.copy(profile = result.value) }
             is AppResult.Failure -> showMessage(result.message)
+        }
+    }
+
+    fun reauthenticateEmail(email: String, password: String, onSuccess: () -> Unit) = viewModelScope.launch {
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.reauthenticateEmail(email, password)) {
+            is AppResult.Success -> { _state.update { it.copy(authLoading = false) }; onSuccess() }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun reauthenticateGoogle(onSuccess: () -> Unit) = viewModelScope.launch {
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.reauthenticateGoogle()) {
+            is AppResult.Success -> { _state.update { it.copy(authLoading = false) }; onSuccess() }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun completeProfile(name: String, phone: String, address: DeliveryAddress) = viewModelScope.launch {
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.updateProfile(name, phone, address)) {
+            is AppResult.Success -> _state.update { it.copy(authLoading = false, profile = result.value, message = "Profile completed.") }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
+        }
+    }
+
+    fun signInWithGoogle() = viewModelScope.launch {
+        if (_state.value.authLoading) return@launch
+        _state.update { it.copy(authLoading = true, authError = null) }
+        when (val result = authRepository.signInWithGoogle()) {
+            is AppResult.Success -> _state.update { it.copy(authLoading = false, profile = result.value) }
+            is AppResult.Failure -> _state.update { it.copy(authLoading = false, authError = result.message) }
         }
     }
 
@@ -213,7 +416,85 @@ class CustomerViewModel(
         }
     }
 
-    fun signOut() = viewModelScope.launch { authRepository.signOut() }
+    fun signOut() = viewModelScope.launch {
+        preferences?.clearPendingStationLink()
+        _state.update { it.copy(pendingStationLink = null, pendingStationSelection = null) }
+        authRepository.signOut()
+    }
+
+    fun handleIncomingLink(rawUri: String?) {
+        val pending = PendingStationLink.parse(rawUri)
+        if (pending == null) {
+            showMessage("This AquaHub ordering link is invalid.")
+            return
+        }
+        _state.update { it.copy(pendingStationLink = pending, resolvingStationLink = false, browsingDiscovery = false) }
+        viewModelScope.launch { preferences?.setPendingStationLink(pending) }
+        if (_state.value.profile != null) resolvePendingStationLink()
+    }
+
+    private fun resolvePendingStationLink() {
+        if (pendingLinkJob?.isActive == true) return
+        val pending = _state.value.pendingStationLink ?: return
+        if (_state.value.profile == null) return
+        pendingLinkJob = viewModelScope.launch {
+            _state.update { it.copy(resolvingStationLink = true, stationsError = null) }
+            when (val result = catalogRepository.resolveStation(pending.publicStationCode)) {
+                is AppResult.Success -> {
+                    if (shouldConfirmStationChange(result.value)) {
+                        _state.update {
+                            it.copy(
+                                pendingStationSelection = result.value,
+                                resolvingStationLink = false,
+                                message = "Review the station switch before linking this QR code.",
+                            )
+                        }
+                        return@launch
+                    }
+                    selectStation(result.value, persistPreference = false)
+                    when (val saved = authRepository.setPreferredStation(PreferredStation(result.value.businessId, result.value.id, pending.source))) {
+                        is AppResult.Success -> {
+                            _state.update {
+                                it.copy(
+                                    profile = saved.value,
+                                    stations = listOf(result.value),
+                                    selectedStation = result.value,
+                                    pendingStationLink = null,
+                                    resolvingStationLink = false,
+                                    browsingDiscovery = false,
+                                    message = "Linked to ${result.value.name}.",
+                                ).withValidPaymentMethod()
+                            }
+                            observeProductsFor(result.value)
+                            restartLinkedStationObservation(saved.value)
+                            preferences?.clearPendingStationLink()
+                        }
+                        is AppResult.Failure -> _state.update { it.copy(resolvingStationLink = false, message = saved.message) }
+                    }
+                }
+                is AppResult.Failure -> {
+                    _state.update { it.copy(resolvingStationLink = false, message = result.message) }
+                }
+            }
+        }
+    }
+
+    fun retryPendingStationLink() = resolvePendingStationLink()
+
+    fun setDiscoveryMode(enabled: Boolean) = _state.update { it.copy(browsingDiscovery = false) }
+
+    fun clearAuthError() = _state.update { it.copy(authError = null) }
+
+    fun deleteAccount() = viewModelScope.launch {
+        _state.update { it.copy(deletingAccount = true, authError = null) }
+        when (val result = authRepository.deleteAccount()) {
+            is AppResult.Success -> {
+                preferences?.clearPendingStationLink()
+                _state.update { it.copy(deletingAccount = false, profile = null, pendingStationLink = null, pendingStationSelection = null, orders = emptyList(), cart = emptyList(), savedAddresses = emptyList(), message = "Your AquaHub account was deleted.") }
+            }
+            is AppResult.Failure -> _state.update { it.copy(deletingAccount = false, authError = result.message) }
+        }
+    }
 
     fun setSearch(query: String) = _state.update { it.copy(searchQuery = query) }
 
@@ -329,8 +610,21 @@ class CustomerViewModel(
         )
     }
 
-    fun selectStation(station: PublicStation) {
-        if (_state.value.selectedStation?.id != station.id && _state.value.cart.isNotEmpty()) {
+    fun selectStation(
+        station: PublicStation,
+        persistPreference: Boolean = true,
+        acquisitionSource: CustomerAcquisitionSource? = null,
+    ) {
+        val profile = _state.value.profile
+        if (
+            persistPreference &&
+            profile != null &&
+            (profile.preferredBusinessId != station.businessId || profile.preferredStationId != station.id)
+        ) {
+            showMessage("Scan this station's AquaHub QR code before switching stations.")
+            return
+        }
+        if (_state.value.selectedStation?.let { it.id != station.id || it.businessId != station.businessId } == true && _state.value.cart.isNotEmpty()) {
             _state.update { it.copy(cart = emptyList(), message = "Cart cleared because you changed stations.") }
         }
         _state.update {
@@ -339,12 +633,70 @@ class CustomerViewModel(
                 products = emptyList(),
                 businessRulesRead = false,
                 businessRulesAccepted = false
-            )
+            ).withValidPaymentMethod()
         }
+        observeProductsFor(station)
+        if (persistPreference && _state.value.profile != null) {
+            viewModelScope.launch {
+                when (val result = authRepository.setPreferredStation(
+                    PreferredStation(
+                        businessId = station.businessId,
+                        stationId = station.id,
+                        acquisitionSource = acquisitionSource
+                            ?: _state.value.profile?.acquisitionSource?.takeIf { it.isStationOwned }
+                            ?: CustomerAcquisitionSource.STATION_QR,
+                    ),
+                )) {
+                    is AppResult.Success -> _state.update { it.copy(profile = result.value) }
+                    is AppResult.Failure -> showMessage(result.message)
+                }
+            }
+        }
+    }
+
+    private fun observeProductsFor(station: PublicStation) {
         productJob?.cancel()
         productJob = viewModelScope.launch {
             catalogRepository.observeProducts(station.businessId, station.id).collect { snapshot ->
                 _state.update { it.copy(products = snapshot.items, productsFromCache = snapshot.isFromCache) }
+            }
+        }
+    }
+
+    fun shouldConfirmStationChange(station: PublicStation): Boolean =
+        _state.value.selectedStation?.let { it.id != station.id || it.businessId != station.businessId } == true &&
+            _state.value.cart.isNotEmpty()
+
+    fun requestStationChange(station: PublicStation) {
+        _state.update { it.copy(pendingStationSelection = station) }
+    }
+
+    fun confirmStationChange() {
+        val station = _state.value.pendingStationSelection ?: return
+        val linkIsPending = _state.value.pendingStationLink != null
+        _state.update {
+            it.copy(
+                pendingStationSelection = null,
+                cart = emptyList(),
+                message = "Cart cleared because you changed stations.",
+            )
+        }
+        selectStation(station, persistPreference = !linkIsPending)
+        if (linkIsPending) {
+            viewModelScope.launch {
+                pendingLinkJob?.join()
+                resolvePendingStationLink()
+            }
+        }
+    }
+
+    fun cancelStationChange() {
+        val linkIsPending = _state.value.pendingStationLink != null
+        _state.update { it.copy(pendingStationSelection = null) }
+        if (linkIsPending) {
+            viewModelScope.launch {
+                preferences?.clearPendingStationLink()
+                _state.update { it.copy(pendingStationLink = null, message = "Station link cancelled. Your current cart was kept.") }
             }
         }
     }
@@ -367,8 +719,16 @@ class CustomerViewModel(
         state.copy(cart = updated)
     }
 
-    fun setDeliveryMode(mode: DeliveryMode) = _state.update {
-        it.copy(deliveryMode = mode).withSelectedSavedAddressIfBlank()
+    fun setDeliveryMode(mode: DeliveryMode) = _state.update { current ->
+        val changed = current.copy(deliveryMode = mode)
+        changed.copy(
+            selectedPaymentMethod = changed.selectedPaymentMethod
+                ?.takeIf { it in changed.availablePaymentMethods }
+                ?: changed.availablePaymentMethods.firstOrNull()
+        ).withSelectedSavedAddressIfBlank()
+    }
+    fun setPaymentMethod(method: PaymentMethod) = _state.update {
+        if (method in it.availablePaymentMethods) it.copy(selectedPaymentMethod = method) else it
     }
     fun setAddress(address: String) = _state.update { it.copy(address = address) }
     fun setCustomerNote(note: String) = _state.update { it.copy(customerNote = note.take(500)) }
@@ -381,11 +741,26 @@ class CustomerViewModel(
         it.copy(businessRulesAccepted = accepted && it.businessRulesRead)
     }
 
-    fun prepareCheckout() = _state.update { it.withSelectedSavedAddressIfBlank() }
+    fun prepareCheckout() = _state.update {
+        it.withSelectedSavedAddressIfBlank().copy(
+            // Consent is specific to this checkout attempt. Returning to the cart and
+            // opening checkout again must require a fresh acknowledgement.
+            businessRulesRead = false,
+            businessRulesAccepted = false,
+        )
+    }
 
     fun submitOrder(onCreated: (CustomerOrder) -> Unit) {
         val state = _state.value
+        if (state.submitting) {
+            showMessage("Your order is already being submitted.")
+            return
+        }
         val station = state.selectedStation ?: return showMessage("Select a station.")
+        val profile = state.profile ?: return showMessage("Sign in before placing an order.")
+        if (station.businessId != profile.preferredBusinessId || station.id != profile.preferredStationId) {
+            return showMessage("Scan the station QR code before ordering.")
+        }
         if (!station.isAcceptingOrders) return showMessage("This station is not accepting orders right now.")
         if (!state.isDeliveryInRange) {
             val radius = station.deliveryRadiusKm
@@ -397,7 +772,7 @@ class CustomerViewModel(
         if (!state.businessRulesAccepted) {
             return showMessage("Read and accept this station's rules before placing the order.")
         }
-        if (state.profile?.phone.isNullOrBlank()) return showMessage("Add your phone number in Account before ordering.")
+        if (profile.phone.isBlank()) return showMessage("Add your phone number in Account before ordering.")
         val request = CreateOrderRequest(
             businessId = station.businessId,
             stationId = station.id,
@@ -406,18 +781,20 @@ class CustomerViewModel(
                 DeliveryAddress("Delivery", state.address, state.location, state.addressPlaceId)
             } else null,
             deliveryMode = state.deliveryMode,
-            paymentMethod = if (state.deliveryMode == DeliveryMode.DELIVERY) PaymentMethod.CASH_ON_DELIVERY else PaymentMethod.CASH,
+            paymentMethod = state.selectedPaymentMethod
+                ?: return showMessage("Choose an available payment method."),
             customerNote = state.customerNote.ifBlank { null },
             acceptedBusinessRulesVersion = station.businessRulesVersion,
         )
         request.validate().firstOrNull()?.let { return showMessage(it) }
+        _state.update { it.copy(submitting = true) }
         viewModelScope.launch {
-            _state.update { it.copy(submitting = true) }
             when (val result = orderRepository.createOrder(request)) {
                 is AppResult.Success -> {
                     _state.update {
                         it.copy(
                             submitting = false,
+                            orders = listOf(result.value) + it.orders.filterNot { order -> order.id == result.value.id },
                             cart = emptyList(),
                             customerNote = "",
                             businessRulesRead = false,
@@ -437,7 +814,7 @@ class CustomerViewModel(
     fun addSavedAddress(address: DeliveryAddress) {
         if (savedAddressDao != null) {
             viewModelScope.launch {
-                savedAddressDao.insert(address.toEntity())
+                savedAddressDao.insert(address.toEntity(requireNotNull(_state.value.profile).uid))
             }
         } else {
             _state.update {
@@ -464,7 +841,7 @@ class CustomerViewModel(
         val addressToDelete = _state.value.savedAddresses.getOrNull(index)
         if (savedAddressDao != null && addressToDelete != null) {
             viewModelScope.launch {
-                savedAddressDao.deleteByAddressLine(addressToDelete.addressLine)
+                savedAddressDao.deleteByAddressLine(requireNotNull(_state.value.profile).uid, addressToDelete.addressLine)
             }
         } else {
             _state.update { state ->
@@ -480,7 +857,7 @@ class CustomerViewModel(
     }
 
     fun reorder(order: CustomerOrder, onReady: () -> Unit) {
-        val station = _state.value.stations.firstOrNull { it.id == order.stationId }
+        val station = _state.value.preferredStation?.takeIf { it.id == order.stationId }
         if (station == null) {
             showMessage("Station is currently not available for ordering.")
             return
@@ -513,7 +890,7 @@ class CustomerViewModel(
     }
 
     fun consumeMessage() = _state.update { it.copy(message = null) }
-    private fun showMessage(message: String) = _state.update { it.copy(message = message) }
+    fun showMessage(message: String) = _state.update { it.copy(message = message) }
 }
 
 internal fun CustomerUiState.withSelectedSavedAddressIfBlank(): CustomerUiState {
@@ -534,3 +911,9 @@ internal fun CustomerUiState.withSelectedSavedAddressIfBlank(): CustomerUiState 
         locationLabel = "${savedAddress.label} (${savedAddress.addressLine.take(24)}...)",
     )
 }
+
+internal fun CustomerUiState.withValidPaymentMethod(): CustomerUiState = copy(
+    selectedPaymentMethod = selectedPaymentMethod
+        ?.takeIf { it in availablePaymentMethods }
+        ?: availablePaymentMethods.firstOrNull()
+)

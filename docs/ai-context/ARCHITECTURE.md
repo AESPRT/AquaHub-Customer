@@ -28,9 +28,17 @@ Listener/job lifetime must follow Firebase user and selected station. Cancel pri
 Current volatile state:
 
 - onboarding completion is process-memory only;
-- cart is process-memory only;
-- saved addresses are UI-state only;
+- cart is process-memory only and is protected by an explicit confirmation before switching stations;
+- pending external station links are stored in DataStore until they resolve or the user signs out;
 - checkout scheduling values are local composable state and never reach the ViewModel/request.
+
+Durable local state:
+
+- the Room customer profile cache includes setup-completion, verification, and primary delivery coordinates;
+- saved addresses are stored in a UID-scoped Room table;
+- appearance mode is stored in DataStore.
+
+These local caches are cleared after successful cloud account deletion and isolated when the Firebase UID changes.
 
 ## Dependency injection
 
@@ -38,15 +46,15 @@ Current volatile state:
 
 ## Authentication and authorization
 
-The app supports Google sign-in through Firebase Auth. `users/{uid}` stores/updates a customer profile. Backend order functions require an active authenticated customer role and App Check. Firestore rules limit customer writes and user-scoped mirrors/devices.
+The app supports email/password and Google sign-in through Firebase Auth, including email verification, password reset, and deletion reauthentication. `users/{uid}` stores/updates a customer profile with authoritative `setupComplete` and delivery coordinates. Backend order functions require an active authenticated customer role and App Check. Firestore rules limit customer writes and user-scoped mirrors/devices.
 
 Role strings are not a business-membership substitute. Customer-side profile creation can choose from allowed role strings under current rules, but owner data access still requires membership. Review this boundary for any authorization work.
 
 ## Data/error behavior
 
-Catalog snapshots carry data, cache metadata and an optional error. Orders/profile listeners are less consistent: some errors are ignored and unchecked Firestore casts inside tolerant mapping can silently omit a malformed order. Correctness-sensitive work should expose a visible/retryable failure and retain last known good state deliberately.
+Catalog snapshots carry data, cache metadata and an optional error. Order listeners retain the last good snapshot, expose cache metadata and surface listener or malformed-document errors with a retry action; unchecked mapping still skips invalid records but now reports that condition visibly.
 
-Firestore listeners give live updates and Firebase's default offline cache, but there is no explicit cache policy, Room database, paging or account cache-clearing layer. User order paths are UID-scoped; public station/product cache can be stale.
+Firestore listeners give live updates and Firebase offline cache. The explicit Room profile/address cache is UID-scoped and cleared on account switches/deletion as appropriate; user order paths are UID-scoped and public station/product cache can be stale.
 
 ## Architectural decisions
 
@@ -56,4 +64,3 @@ Firestore listeners give live updates and Firebase's default offline cache, but 
 - Callable Functions as the trusted mutation boundary.
 - Integer-centavo domain money with checked arithmetic.
 - Debug/Play Integrity App Check by build type.
-

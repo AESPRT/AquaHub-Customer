@@ -15,11 +15,43 @@
       },
       "oauth_client": [
         {
+          "client_id": "986230110871-729a8l6m3iu5g9750vevpd8di3lasgpb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub",
+            "certificate_hash": "d9fb449978f0c581cb35372b2504f39e589b832d"
+          }
+        },
+        {
+          "client_id": "986230110871-9bqn8fskcbepfmiu9a2dc1je1q99n4om.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub",
+            "certificate_hash": "b20d761dfa3fafd7838ad38f47e41d8d410a9b33"
+          }
+        },
+        {
           "client_id": "986230110871-djfrm69u9osub7dqsi14bl75g9lq0klt.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.aesprt.aquahub",
             "certificate_hash": "151898d4973bfc2ac61b448e4fb1d35e110bb775"
+          }
+        },
+        {
+          "client_id": "986230110871-f9thcqdukue52ijd9m0cdntorjm68c8a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub",
+            "certificate_hash": "4cc91b30071c025707ff657244b43475f44a1126"
+          }
+        },
+        {
+          "client_id": "986230110871-rgamq9hopilnt18vvh5ide3aeksi9def.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub",
+            "certificate_hash": "5926e01b5ad9f3306b80bc4dde47b41c1aa952da"
           }
         },
         {
@@ -54,6 +86,46 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "986230110871-6l96hi4e75ooegkuhi82qi1vor5fmmvg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub_customer",
+            "certificate_hash": "51f0f26c5f0cda5f83d3398091c81134f5bd696d"
+          }
+        },
+        {
+          "client_id": "986230110871-er4fh7cbrlllpqm63oes6d7m6rcb1qqo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub_customer",
+            "certificate_hash": "151898d4973bfc2ac61b448e4fb1d35e110bb775"
+          }
+        },
+        {
+          "client_id": "986230110871-g3esi4rhfecgrtsm0scdc3cq9ccihcnu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub_customer",
+            "certificate_hash": "7df4c4a1cefd7a3bc84ec51a29b25273d7e35994"
+          }
+        },
+        {
+          "client_id": "986230110871-hbm0rutat483fdek3v7cuofs5b3upp9h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub_customer",
+            "certificate_hash": "0fc3255e9203aee8bd8b2a9741698637f40200c2"
+          }
+        },
+        {
+          "client_id": "986230110871-vpj2pi0rjav6hb5co65jg0i8r377gqd2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aesprt.aquahub_customer",
+            "certificate_hash": "208660ad024117b2860cfdfe228d6126dffa0d8d"
+          }
+        },
         {
           "client_id": "986230110871-p4euetbhr5o4of54u20jegp7til4dlfd.apps.googleusercontent.com",
           "client_type": 3
