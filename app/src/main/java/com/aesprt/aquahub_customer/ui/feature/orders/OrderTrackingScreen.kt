@@ -167,6 +167,14 @@ fun OrderTrackingContent(
                                 lineHeight = 28.sp
                             )
 
+                            if (order.status == OrderStatus.CANCELLED && !order.cancellationReason.isNullOrBlank()) {
+                                Text(
+                                    text = "Cancellation reason: ${order.cancellationReason}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                )
+                            }
+
                             if (!order.status.isTerminal) {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     LinearProgressIndicator(
@@ -304,6 +312,37 @@ fun OrderTrackingContent(
                         Column {
                             Text("Payment method", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             Text(order.paymentMethod.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            if (order.refunds.isNotEmpty() || order.refundStatusUnavailable) {
+                item {
+                    AquaHubGlassCard(shape = AquaHubShapes.cardSecondary) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Refund updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            if (order.refundStatusUnavailable) {
+                                Text(
+                                    "Refund status could not be refreshed. Check your connection and try again.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            order.refunds.forEach { refund ->
+                                val (label, tint) = when (refund.status.uppercase()) {
+                                    "PENDING" -> "Refund pending" to MaterialTheme.colorScheme.primary
+                                    "COMPLETED" -> "Refund completed" to SuccessGreen
+                                    "FAILED" -> "Refund not completed" to MaterialTheme.colorScheme.error
+                                    else -> refund.status.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase) to MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                HorizontalDivider()
+                                Text("$label · ${refund.amount.format()}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = tint)
+                                Text(refund.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (refund.status.equals("FAILED", ignoreCase = true)) {
+                                    Text("Please contact the station for assistance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
                     }
                 }

@@ -9,12 +9,12 @@ Compose screen
   ↕ CustomerUiState / method calls
 CustomerViewModel
   ↓ repository interfaces
-FirebaseAuthRepository | FirestoreCatalogRepository
-FirebaseOrderRepository | AndroidLocationRepository
-  ↔ Firebase SDK / Fused Location
+SupabaseAuthRepository | SupabaseCatalogRepository
+SupabaseOrderRepository | AndroidLocationRepository
+  ↔ Supabase SDK / Fused Location
 
 Order mutations
-FirebaseOrderRepository → callable Function → Firestore transaction
+SupabaseOrderRepository → Supabase RPC → PostgreSQL transaction
 ```
 
 This is MVVM-style but highly centralized. There is no separate use-case/domain-service layer. Add small, tested domain operations before making `CustomerViewModel` more monolithic; do not move trusted server validation into the client.
@@ -23,7 +23,7 @@ This is MVVM-style but highly centralized. There is no separate use-case/domain-
 
 `CustomerViewModel` exposes a combined immutable `CustomerUiState`. It owns authentication/profile, discovery query/location, station/product listeners, cart, checkout inputs, addresses and customer-order listener jobs.
 
-Listener/job lifetime must follow Firebase user and selected station. Cancel prior catalog/order collections when identity or station changes. Avoid duplicate collectors and stale results after logout. Cart should clear on station change because lines belong to one station.
+Listener/job lifetime must follow the Supabase user and selected station. Cancel prior catalog/order polling jobs when identity or station changes. Avoid duplicate collectors and stale results after logout. Cart should clear on station change because lines belong to one station.
 
 Current volatile state:
 
@@ -38,15 +38,15 @@ Durable local state:
 - saved addresses are stored in a UID-scoped Room table;
 - appearance mode is stored in DataStore.
 
-These local caches are cleared after successful cloud account deletion and isolated when the Firebase UID changes.
+These local caches are cleared after successful cloud account deletion and isolated when the Supabase user ID changes.
 
 ## Dependency injection
 
-`di/CustomerModule.kt` registers singleton `AuthRepository`, `CatalogRepository`, `LocationRepository`, and `OrderRepository` implementations plus `CustomerViewModel`. Keep Firebase object provisioning consistent with `FirebaseConfig`/the SDK and use constructor injection. Do not instantiate repositories in screens.
+`di/CustomerModule.kt` registers singleton `AuthRepository`, `CatalogRepository`, `LocationRepository`, and `OrderRepository` implementations plus `CustomerViewModel`. Firebase Messaging/App Check are initialized at the application boundary; business repositories use Supabase and constructor injection. Do not instantiate repositories in screens.
 
 ## Authentication and authorization
 
-The app supports email/password and Google sign-in through Firebase Auth, including email verification, password reset, and deletion reauthentication. `users/{uid}` stores/updates a customer profile with authoritative `setupComplete` and delivery coordinates. Backend order functions require an active authenticated customer role and App Check. Firestore rules limit customer writes and user-scoped mirrors/devices.
+The app supports email/password and Google sign-in through Supabase Auth, including verification and password reset. Supabase `profiles` stores the authoritative customer setup state and delivery coordinates. Backend order RPCs require an active Supabase session. Firebase remains only for Messaging transport and App Check compatibility.
 
 Role strings are not a business-membership substitute. Customer-side profile creation can choose from allowed role strings under current rules, but owner data access still requires membership. Review this boundary for any authorization work.
 
@@ -54,13 +54,12 @@ Role strings are not a business-membership substitute. Customer-side profile cre
 
 Catalog snapshots carry data, cache metadata and an optional error. Order listeners retain the last good snapshot, expose cache metadata and surface listener or malformed-document errors with a retry action; unchecked mapping still skips invalid records but now reports that condition visibly.
 
-Firestore listeners give live updates and Firebase offline cache. The explicit Room profile/address cache is UID-scoped and cleared on account switches/deletion as appropriate; user order paths are UID-scoped and public station/product cache can be stale.
+Supabase polling gives bounded refreshes for the public catalog and customer orders. The explicit Room profile/address cache is UID-scoped and cleared on account switches/deletion as appropriate; public station/product projections can be stale between polls.
 
 ## Architectural decisions
 
 - Compose/Material 3 and a single signed-in NavHost.
 - Central ViewModel and repository abstractions for a small app.
-- Firebase live listeners instead of an owner-style local database/outbox.
-- Callable Functions as the trusted mutation boundary.
+- Supabase public projections and RPCs as the trusted data boundary.
 - Integer-centavo domain money with checked arithmetic.
 - Debug/Play Integrity App Check by build type.

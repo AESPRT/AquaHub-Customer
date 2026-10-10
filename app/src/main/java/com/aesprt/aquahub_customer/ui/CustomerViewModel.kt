@@ -45,7 +45,7 @@ data class CustomerUiState(
     val sessionReady: Boolean = false,
     val hasCompletedOnboarding: Boolean = false,
     val profile: CustomerProfile? = null,
-    val firebaseConfigured: Boolean = false,
+    val supabaseConfigured: Boolean = false,
     val stations: List<PublicStation> = emptyList(),
     val stationsFromCache: Boolean = false,
     val stationsError: String? = null,
@@ -181,7 +181,7 @@ class CustomerViewModel(
     private val savedAddressDao: SavedAddressDao? = null,
     private val preferences: ThemePreferences? = null,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(CustomerUiState(firebaseConfigured = authRepository.isFirebaseConfigured))
+    private val _state = MutableStateFlow(CustomerUiState(supabaseConfigured = authRepository.isSupabaseConfigured))
     val state: StateFlow<CustomerUiState> = _state.asStateFlow()
     private var productJob: Job? = null
     private var orderJob: Job? = null
@@ -273,7 +273,7 @@ class CustomerViewModel(
                     val refreshedSelectedStation = snapshot.items.singleOrNull()
                     // A direct document listener can emit an empty local-cache snapshot
                     // immediately after a QR link is saved. Keep the station we just
-                    // resolved until Firestore has delivered an authoritative server result.
+                    // resolved until the Supabase server has returned the authoritative result.
                     if (refreshedSelectedStation == null && snapshot.isFromCache && current.selectedStation != null) {
                         return@update current.copy(
                             stationsFromCache = true,

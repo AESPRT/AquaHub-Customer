@@ -287,6 +287,15 @@ enum class OrderStatus(val label: String) {
     val isTerminal: Boolean get() = this in setOf(COMPLETED, REJECTED, CANCELLED)
 }
 
+data class CustomerRefundSummary(
+    val id: String,
+    val amount: Money,
+    val status: String,
+    val reason: String,
+    val createdAt: Long,
+    val completedAt: Long? = null
+)
+
 data class CustomerOrder(
     val id: String,
     val orderNumber: String,
@@ -306,6 +315,9 @@ data class CustomerOrder(
     val rejectionReason: String?,
     val requestedAt: Long,
     val updatedAt: Long,
+    val cancellationReason: String? = null,
+    val refunds: List<CustomerRefundSummary> = emptyList(),
+    val refundStatusUnavailable: Boolean = false,
 )
 
 data class CreateOrderRequest(

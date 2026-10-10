@@ -115,7 +115,7 @@ fun CustomerApp(
                 // 4. Authentication
                 !signedIn -> {
                     AuthScreen(
-                        firebaseConfigured = state.firebaseConfigured,
+                        supabaseConfigured = state.supabaseConfigured,
                         viewModel = viewModel
                     )
                 }

@@ -12,19 +12,22 @@ import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.aesprt.aquahub_customer.MainActivity
-import com.google.firebase.FirebaseApp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import com.aesprt.aquahub_customer.data.supabase.SupabaseDeviceTokenRepository
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class CustomerMessagingService : FirebaseMessagingService() {
+    private val tokenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        saveDeviceToken(this, token, uid)
+        tokenScope.launch { SupabaseDeviceTokenRepository.upsert(token) }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -39,7 +42,7 @@ class CustomerMessagingService : FirebaseMessagingService() {
             ?: "Your AquaHub order has a new update."
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            message.data["orderId"]?.let { putExtra("orderId", it) }
+            (message.data["order_id"] ?: message.data["orderId"])?.let { putExtra("orderId", it) }
         }
         val pendingIntent = PendingIntent.getActivity(
             applicationContext,
@@ -83,18 +86,14 @@ class CustomerMessagingService : FirebaseMessagingService() {
         }
 
         fun registerCurrentDeviceToken(context: Context, explicitUid: String? = null) {
-            val uid = explicitUid ?: FirebaseAuth.getInstance().currentUser?.uid ?: return
+            if (explicitUid != null) return // legacy parameter retained for source compatibility only
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                if (token.isNotBlank()) saveDeviceToken(context, token, uid)
+                if (token.isNotBlank()) {
+                    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                        SupabaseDeviceTokenRepository.upsert(token)
+                    }
+                }
             }
-        }
-
-        private fun saveDeviceToken(context: Context, token: String, uid: String) {
-            val app = FirebaseApp.getApps(context).firstOrNull() ?: return
-            FirebaseFirestore.getInstance(app, FIRESTORE_DATABASE)
-                .collection("users").document(uid)
-                .collection("devices").document(token.takeLast(64))
-                .set(mapOf("token" to token, "platform" to "ANDROID", "updatedAt" to System.currentTimeMillis()))
         }
     }
 }

@@ -10,7 +10,7 @@ AquaHubCustomer is the customer ordering Android app and owns the active Firebas
 - Central state/events: `ui/CustomerViewModel.kt`.
 - Domain models/contracts: `domain/Models.kt`, `domain/Repositories.kt`.
 - Firebase/location repositories: `data/`; Koin: `di/CustomerModule.kt`.
-- Active callable/trigger backend: `functions/src/index.ts`.
+- Active trusted backend: workspace `supabase/functions/` and `supabase/migrations/`; the former Firebase Functions package is retired.
 - Authorization/indexes: `firestore.rules`, `firestore.indexes.json`; rules tests: `firebase-tests/`.
 
 ## Change rules
@@ -37,4 +37,3 @@ Deeper context:
 - `docs/ai-context/NAVIGATION.md`
 - `docs/ai-context/DATA_AND_BACKEND.md`
 - workspace `../docs/ai-context/SHARED_DOMAIN_AND_CONTRACTS.md`
-

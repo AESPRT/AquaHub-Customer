@@ -46,7 +46,7 @@ The root onboarding/auth states are outside `CustomerNavGraph`; the NavHost begi
 
 ## Discovery rules
 
-`FirestoreCatalogRepository` listens to a collection group of station documents and excludes explicitly inactive stations. It maps online acceptance/open state and delivery defaults. The ViewModel applies text search, local-time opening-hours filtering (including overnight schedules), manual-open overrides, and distance ordering from the customer's selected/GPS location. This is not a geospatial query and can become expensive at scale.
+`SupabaseCatalogRepository` polls the public station/product projections and excludes inactive or unavailable rows server-side. It maps online acceptance/open state and delivery defaults. The ViewModel applies text search, local-time opening-hours filtering (including overnight schedules), manual-open overrides, and distance ordering from the customer's selected/GPS location.
 
 Every customer must link one station through a QR/link/referral before entering the main app. The catalog performs a direct document observation for exactly the stored business/station pair, and the order callable rejects a different pair even if a modified client submits it. Scanning another valid QR from Profile intentionally replaces the one active link.
 

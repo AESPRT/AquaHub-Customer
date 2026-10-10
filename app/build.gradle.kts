@@ -1,10 +1,12 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val localProperties = Properties().apply {
@@ -25,6 +27,12 @@ val termsUrl: String = localProperties.getProperty("AQUAHUB_TERMS_URL")
 val supportUrl: String = localProperties.getProperty("AQUAHUB_SUPPORT_URL")
     ?: System.getenv("AQUAHUB_SUPPORT_URL")
     ?: ""
+val supabaseUrl: String = localProperties.getProperty("SUPABASE_URL")
+    ?: System.getenv("SUPABASE_URL")
+    ?: ""
+val supabaseAnonKey: String = localProperties.getProperty("SUPABASE_ANON_KEY")
+    ?: System.getenv("SUPABASE_ANON_KEY")
+    ?: ""
 
 android {
     namespace = "com.aesprt.aquahub_customer"
@@ -34,8 +42,8 @@ android {
         applicationId = "com.aesprt.aquahub_customer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "aqc-1.0.0"
+        versionCode = 3
+        versionName = "aqc-1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
@@ -43,6 +51,8 @@ android {
         buildConfigField("String", "PRIVACY_POLICY_URL", "\"" + privacyPolicyUrl + "\"")
         buildConfigField("String", "TERMS_URL", "\"" + termsUrl + "\"")
         buildConfigField("String", "SUPPORT_URL", "\"" + supportUrl + "\"")
+        buildConfigField("String", "SUPABASE_URL", "\"" + supabaseUrl + "\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"" + supabaseAnonKey + "\"")
     }
 
     buildTypes {
@@ -53,12 +63,18 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
@@ -97,12 +113,12 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore)
-    implementation(libs.firebase.functions)
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.appcheck.playintegrity)
-    debugImplementation(libs.firebase.appcheck.debug)
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.functions)
+    implementation(libs.ktor.client.android)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

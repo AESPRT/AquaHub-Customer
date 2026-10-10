@@ -196,7 +196,27 @@ service cloud.firestore {
     }
 
     function supportedOwnerPaymentMethod(value) {
-      return value in ['CASH', 'CASH_ON_DELIVERY', 'GCASH', 'MAYA'];
+      return value in ['CASH', 'CASH_ON_DELIVERY', 'GCASH', 'MAYA', 'CLIENT_ACCOUNT'];
+    }
+
+    function validPaymentShape(stationId, paymentId) {
+      return request.resource.data.id == paymentId &&
+        request.resource.data.stationId == stationId &&
+        request.resource.data.orderId is string &&
+        request.resource.data.orderId.size() > 0 &&
+        supportedOwnerPaymentMethod(request.resource.data.paymentMethod) &&
+        request.resource.data.paymentMethod != 'CLIENT_ACCOUNT' &&
+        request.resource.data.amountCentavos is int &&
+        request.resource.data.amountCentavos > 0 &&
+        request.resource.data.amountCentavos <= 10000000000 &&
+        request.resource.data.status == 'PAID' &&
+        request.resource.data.createdAt is int &&
+        request.resource.data.clientUpdatedAt is int &&
+        (!request.resource.data.keys().hasAny(['referenceNumber']) ||
+          request.resource.data.referenceNumber == null ||
+          (request.resource.data.referenceNumber is string && request.resource.data.referenceNumber.size() <= 120)) &&
+        (!request.resource.data.keys().hasAny(['paidAt']) ||
+          request.resource.data.paidAt == null || request.resource.data.paidAt is int);
     }
 
     function validOrderPaymentUpdate(stationId, orderId) {
@@ -489,7 +509,7 @@ service cloud.firestore {
             validOrderIdentity(stationId, id);
           allow update: if (operatesStation(businessId, stationId) &&
             validOrderUpdate(stationId, id)) ||
-            (managesBusiness(businessId) && validOrderPaymentUpdate(stationId, id));
+            (canProcessWalkIn(businessId, stationId) && validOrderPaymentUpdate(stationId, id));
           allow delete: if false;
         }
 
@@ -508,10 +528,9 @@ service cloud.firestore {
         }
 
         match /payments/{id} {
-          allow read: if managesBusiness(businessId);
-          allow create: if managesBusiness(businessId) &&
-            belongsToStation(stationId) &&
-            supportedOwnerPaymentMethod(request.resource.data.paymentMethod);
+          allow read: if canProcessWalkIn(businessId, stationId);
+          allow create: if canProcessWalkIn(businessId, stationId) &&
+            validPaymentShape(stationId, id);
           allow update: if managesBusiness(businessId) &&
             belongsToStation(stationId) &&
             request.resource.data.stationId == resource.data.stationId &&

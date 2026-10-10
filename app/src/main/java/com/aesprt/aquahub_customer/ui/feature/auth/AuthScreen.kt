@@ -37,13 +37,13 @@ private enum class AuthMode { SIGN_IN, CREATE_ACCOUNT }
 
 @Composable
 fun AuthScreen(
-    firebaseConfigured: Boolean,
+    supabaseConfigured: Boolean,
     viewModel: CustomerViewModel,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
     AuthContent(
-        firebaseConfigured = firebaseConfigured,
+        supabaseConfigured = supabaseConfigured,
         authLoading = state.authLoading,
         authError = state.authError,
         onSignIn = viewModel::signInWithEmail,
@@ -57,7 +57,7 @@ fun AuthScreen(
 
 @Composable
 private fun AuthContent(
-    firebaseConfigured: Boolean,
+    supabaseConfigured: Boolean,
     authLoading: Boolean,
     authError: String?,
     onSignIn: (String, String) -> Unit,
@@ -265,7 +265,7 @@ private fun AuthContent(
             )
             OutlinedButton(
                 onClick = onGoogleSignIn,
-                enabled = firebaseConfigured && !authLoading,
+                enabled = supabaseConfigured && !authLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 54.dp)
@@ -281,8 +281,8 @@ private fun AuthContent(
                 )
                 Text("Continue with Google", modifier = Modifier.padding(start = 10.dp))
             }
-            if (!firebaseConfigured) Text(
-                "Firebase is not configured, so sign-in and live ordering are unavailable.",
+            if (!supabaseConfigured) Text(
+                "Supabase is not configured, so sign-in and live ordering are unavailable.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 8.dp)
@@ -318,7 +318,7 @@ private fun AuthContent(
 private fun AuthScreenSignInPreview() {
     AquaHubCustomerTheme(dynamicColor = false) {
         AuthContent(
-            firebaseConfigured = true,
+            supabaseConfigured = true,
             authLoading = false,
             authError = null,
             onSignIn = { _, _ -> },
@@ -336,7 +336,7 @@ private fun AuthScreenSignInPreview() {
 private fun AuthScreenCreateAccountPreview() {
     AquaHubCustomerTheme(dynamicColor = false) {
         AuthContent(
-            firebaseConfigured = true,
+            supabaseConfigured = true,
             authLoading = false,
             authError = null,
             onSignIn = { _, _ -> },

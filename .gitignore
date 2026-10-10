@@ -16,6 +16,8 @@
 .cxx
 **/node_modules/
 functions/lib/
+functions/.env*
+!functions/.env.example
 *-debug.log
 firebase-tests/.firebase/
 local.properties

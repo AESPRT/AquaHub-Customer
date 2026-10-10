@@ -8,11 +8,11 @@ AquaHubCustomer is the customer-facing Android app for discovering water station
 
 - Kotlin, Android SDK 37/min 26, Java 11, Compose and Material 3.
 - Navigation Compose, Koin, coroutines, `StateFlow`.
-- Firebase Auth, named Firestore database `aquahub`, Firebase Functions, FCM and App Check.
+- Supabase Auth/PostgREST/Edge Functions, Room cache, and Firebase Cloud Messaging for transport.
 - Coil renders optional station and product image URLs projected by the owner app; existing icons remain the fallback.
 - Fused Location and Google Maps/Places location picker; Room profile/address cache and DataStore appearance preference.
 - Firebase SDK disk cache provides implicit offline reads; cart, onboarding, and checkout scheduling remain process-memory state.
-- Active Functions use TypeScript/Node 22 in `functions/`.
+- Trusted server operations use Supabase Edge Functions under the workspace `supabase/functions/`.
 - No Retrofit/OkHttp REST layer and no online-payment SDK.
 
 ## Architecture summary
@@ -39,12 +39,12 @@ Catalog and orders use Firestore callback flows/live listeners. Auth uses email/
 | Location | `data/location/` |
 | Navigation | `ui/navigation/` |
 | Screens/UI system | `ui/feature/`, `ui/components/`, `ui/theme/` |
-| Backend | `functions/src/index.ts` |
+| Backend | `supabase/functions/` and `supabase/migrations/` |
 | Rules/tests | `firestore.rules`, `firestore.indexes.json`, `firebase-tests/` |
 
 ## Configuration and boundaries
 
-Firebase build configuration is provided by `google-services.json`; never document its values. Debug builds install debug App Check and non-debug builds use Play Integrity. Callable Functions enforce and consume App Check tokens. Email/password and Google Auth providers are configured in `firebase.json`. The latest local Functions cancellation hardening and Firestore profile/device/membership rules hardening are built but not verified as deployed because the Firebase CLI session expired; the Customer debug token is registered for the connected Samsung SM-A366B debug build; delete it after testing and never commit it. Production signing/Play Integrity and runtime manual QA still require verification.
+Firebase build configuration is retained only for FCM transport and must never be documented with its values. Supabase Auth providers and Edge Functions are the active authentication/business backend. Historical Firestore/Storage configuration remains available only for non-destructive data operations; it is not an Android runtime dependency.
 
 The manifest declares internet/network/location/notification permissions and FCM service. Backup is disabled. There are debug/release build types, no flavors, no source-controlled production signing setup, and release optimization is currently disabled.
 

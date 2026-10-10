@@ -1,10 +1,10 @@
 package com.aesprt.aquahub_customer.di
 
-import com.aesprt.aquahub_customer.data.auth.FirebaseAuthRepository
-import com.aesprt.aquahub_customer.data.catalog.FirestoreCatalogRepository
+import com.aesprt.aquahub_customer.data.auth.SupabaseAuthRepository
+import com.aesprt.aquahub_customer.data.catalog.SupabaseCatalogRepository
 import com.aesprt.aquahub_customer.data.local.CustomerDatabase
 import com.aesprt.aquahub_customer.data.location.AndroidLocationRepository
-import com.aesprt.aquahub_customer.data.order.FirebaseOrderRepository
+import com.aesprt.aquahub_customer.data.order.SupabaseOrderRepository
 import com.aesprt.aquahub_customer.data.preferences.ThemePreferences
 import com.aesprt.aquahub_customer.domain.AuthRepository
 import com.aesprt.aquahub_customer.domain.CatalogRepository
@@ -19,9 +19,9 @@ val customerModule = module {
     single { ThemePreferences(get()) }
     single { get<CustomerDatabase>().profileDao() }
     single { get<CustomerDatabase>().addressDao() }
-    single<AuthRepository> { FirebaseAuthRepository(get(), get(), get(), get()) }
-    single<CatalogRepository> { FirestoreCatalogRepository(get()) }
+    single<AuthRepository> { SupabaseAuthRepository(get(), get(), get(), get()) }
+    single<CatalogRepository> { SupabaseCatalogRepository() }
     single<LocationRepository> { AndroidLocationRepository(get()) }
-    single<OrderRepository> { FirebaseOrderRepository(get()) }
+    single<OrderRepository> { SupabaseOrderRepository() }
     viewModel { CustomerViewModel(get(), get(), get(), get(), get(), get()) }
 }
